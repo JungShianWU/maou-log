@@ -520,13 +520,16 @@ test('在家修煉的日子 GM 不能再更新狀態，但可以修改日誌', a
   await login(page, GM);
   await tab(page, 'record');
   await expect(page.locator('#view-record')).toContainText('今天在家修煉，不再更新狀態');
-  await expect(page.locator('[data-status]')).toHaveCount(0);
+  // 只剩「記錄傳聞」，沒有其他狀態按鈕
+  await expect(page.locator('[data-status]')).toHaveCount(1);
+  await expect(page.locator('[data-status="rumor"]')).toHaveCount(1);
   await expect(page.locator('#offsets')).toHaveCount(0);
   await expect(page.locator('#view-record [data-edit]')).toHaveCount(1);
-  // 地圖的單日細節也不能補登
+  // 地圖的單日細節：補登只能選傳聞
   await tab(page, 'calendar');
   await page.locator('[data-day="2026-11-24"]').click();
-  await expect(page.locator('#d-add')).toHaveCount(0);
+  await page.locator('#d-add').click();
+  await expect(page.locator('#e-status option')).toHaveText(['🗣️ 其他觀察者說的話（傳聞）']);
   await page.keyboard.press('Escape');
   await tab(page, 'record');
   // Lv.50 沒有在家修煉，照常可以記錄
@@ -827,4 +830,111 @@ test('讀取存檔：魔王內容沒變就不附加修改歷史（重複匯入�
   }
   await tab(page, 'record');
   await expect(page.locator('.boss-note [data-hist]')).toHaveCount(0);
+});
+
+test('傳聞：旁白必填，不改變魔王狀態，可以一次列出所有傳聞', async ({ page, browser }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('[data-status="work"]').click();
+  await page.locator('#done').click();
+
+  // 沒寫旁白 → 擋下
+  await page.locator('[data-status="rumor"]').click();
+  await expect(page.locator('#toast')).toHaveText('傳聞要寫旁白：誰說了什麼');
+  await expect(page.locator('#sheet')).not.toBeVisible();
+
+  await page.locator('#note').fill('聽說他今天要開長會');
+  await page.locator('[data-status="rumor"]').click();
+  await expect(page.locator('#msg')).toHaveValue(/🗣️ 傳聞（Lv\.30 魔王・09:12）：聽說他今天要開長會/);
+  await page.locator('#done').click();
+  // 魔王狀態仍是上線
+  await expect(page.locator('.now .label')).toContainText('上線');
+  await expect(page.locator('#view-record .list')).toContainText('聽說他今天要開長會');
+
+  // 觀戰者也能看傳聞一覽
+  const ctx = await browser.newContext();
+  const viewer = await ctx.newPage();
+  await open(viewer);
+  await viewer.locator('#rumor-list').click();
+  await expect(viewer.locator('#sheet')).toContainText('傳聞一覽');
+  await expect(viewer.locator('#sheet')).toContainText('聽說他今天要開長會');
+  await expect(viewer.locator('#sheet')).toContainText('g***@e***.test');
+  await ctx.close();
+});
+
+test('冒險頁顯示最早遇見、最後遇見與觀察時數，不顯示可下線', async ({ page, request }) => {
+  await put(request, 'boards/main/events/a1', { boss: 'b30', at: new Date('2026-11-24T08:50:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/a2', { boss: 'b30', at: new Date('2026-11-24T09:05:00+08:00').getTime(), status: 'slack', note: '', by: GM.uid });
+  await open(page);
+  const facts = page.locator('#view-record .facts');
+  await expect(facts).toContainText('最早遇見08:50');
+  await expect(facts).toContainText('最後遇見09:05（發呆摸魚）');
+  await expect(facts).toContainText('觀察時數');
+  await expect(page.locator('#view-record')).not.toContainText('可下線');
+});
+
+test('休戰日在家修煉：地圖顯示在家修煉，不是假日加場', async ({ page, request }) => {
+  // 2026-11-22 是週日
+  await put(request, 'boards/main/events/h1', { boss: 'b30', at: new Date('2026-11-22T10:00:00+08:00').getTime(), status: 'remote', note: '', by: GM.uid });
+  await open(page);
+  await tab(page, 'calendar');
+  const cell = page.locator('[data-day="2026-11-22"]');
+  await expect(cell).toContainText('在家修煉');
+  // 格子的顏色條是「在家修煉」而不是「假日加場」
+  const color = await cell.locator('.bar').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(color).toBe('rgb(115, 239, 247)');
+});
+
+test('地圖不會被長文字撐寬（切換魔王也一樣）', async ({ page, request }) => {
+  for (const [id, d] of [['l1', '2026-11-02'], ['l2', '2026-11-03']]) {
+    await put(request, `boards/main/leaves/${id}`, { boss: 'b50', date: d, kind: 'full', type: '❓ 一個很長很長很長的假別名稱', note: '', by: GM.uid });
+  }
+  await open(page);
+  await tab(page, 'calendar');
+  await chip(page, 50).click();
+  const fits = await page.evaluate(() => {
+    const scr = document.querySelector('#scroll');
+    return scr.scrollWidth <= scr.clientWidth && document.querySelector('.cal').getBoundingClientRect().right <= scr.getBoundingClientRect().right;
+  });
+  expect(fits).toBe(true);
+});
+
+test('在家修煉的日子仍可記錄傳聞（只能記傳聞），只有傳聞的日子單日細節不顯示空白數字', async ({ page, request }) => {
+  await put(request, 'boards/main/events/r1', { boss: 'b30', at: new Date('2026-11-24T09:30:00+08:00').getTime(), status: 'remote', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/q1', { boss: 'b30', at: new Date('2026-11-20T10:00:00+08:00').getTime(), status: 'rumor', note: '聽說請假', by: GM.uid });
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('#note').fill('聽說在家開會');
+  await page.locator('[data-status="rumor"]').click();
+  await page.locator('#done').click();
+  await expect(page.locator('#view-record .list')).toContainText('聽說在家開會');
+
+  await tab(page, 'calendar');
+  await page.locator('[data-day="2026-11-24"]').click();
+  await page.locator('#d-add').click();
+  await expect(page.locator('#e-status option')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+
+  await page.locator('[data-day="2026-11-20"]').click();
+  await expect(page.locator('#sheet')).toContainText('聽說請假');
+  await expect(page.locator('#sheet .facts')).toHaveCount(0);
+});
+
+test('休戰日在家修煉不鎖記錄：補登仍可選所有狀態；只有傳聞的日子補登預設 09:00 上線', async ({ page, request }) => {
+  await put(request, 'boards/main/events/h1', { boss: 'b30', at: new Date('2026-11-22T10:00:00+08:00').getTime(), status: 'remote', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/q1', { boss: 'b30', at: new Date('2026-11-20T10:00:00+08:00').getTime(), status: 'rumor', note: '聽說請假', by: GM.uid });
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'calendar');
+  await page.locator('[data-day="2026-11-22"]').click();
+  await page.locator('#d-add').click();
+  expect(await page.locator('#e-status option').count()).toBeGreaterThan(5);
+  await page.keyboard.press('Escape');
+
+  await page.locator('[data-day="2026-11-20"]').click();
+  await page.locator('#d-add').click();
+  await expect(page.locator('#e-time')).toHaveValue('09:00');
+  await expect(page.locator('#e-status')).toHaveValue('work');
 });

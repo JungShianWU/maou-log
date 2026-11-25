@@ -131,14 +131,14 @@
   /* 月曆 */
   .month-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 6px; }
   .month-nav .title { font-size: 20px; color: var(--gold); }
-  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; } /* minmax(0,…)：長文字不會撐寬欄位 */
   .cal .wd { text-align: center; font-size: 13px; color: var(--sub); }
   .cal .d {
-    aspect-ratio: 1 / 1.15; background: var(--night); border: 2px solid var(--slate); padding: 3px 1px; cursor: pointer;
+    aspect-ratio: 1 / 1.15; min-width: 0; background: var(--night); border: 2px solid var(--slate); padding: 3px 1px; cursor: pointer;
     display: flex; flex-direction: column; align-items: center; justify-content: space-between; color: var(--white);
   }
   .cal .d .n { font-size: 15px; }
-  .cal .d .s { font-size: 11px; line-height: 1.1; color: var(--sub); white-space: nowrap; overflow: hidden; max-width: 100%; }
+  .cal .d .s { font-size: 11px; line-height: 1.1; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .cal .d .bar { width: 70%; height: 5px; }
   .cal .d.today { border-color: var(--gold); }
   .cal .d.off { background: transparent; border-color: transparent; }
@@ -497,6 +497,20 @@ async function ensureCalendar(year) {
 
 function dayInfo(date) { return R.dayType(date, ui.calendar, DB.settings.overrides); }
 
+// ---------- 傳聞（其他觀察者說的話）----------
+const isRumor = (e) => !!R.STATUSES[e.status]?.rumor;
+const rumors = () => bossEvents().filter(isRumor).sort((a, b) => b.at - a.at);
+function openRumors() {
+  const list = rumors();
+  openSheet(`
+    <h3>🗣️ 傳聞一覽・${esc(bossName())}</h3>
+    <div class="small muted" style="margin-bottom:8px">其他觀察者說的話，共 ${list.length} 則（新的在上面）</div>
+    <ul class="list">${list.map((e) => `<li style="align-items:flex-start"><span class="time" style="width:auto;white-space:nowrap">${fmtDate(R.dateKey(e.at))}<br>${R.fmtMin(R.minutesOf(e.at))}</span>
+      <span>${esc(e.note)}${reporterHTML(e)}${historyHTML(e, 'event')}</span></li>`).join('')}</ul>
+    <div class="sheet-actions" style="grid-template-columns:1fr"><button class="btn" id="rumor-close">關閉</button></div>
+  `, (el) => { $('#rumor-close', el).onclick = closeSheet; });
+}
+
 // ---------- 魔王 ----------
 // 目前選的魔王；地圖、成就、日誌都只看這隻
 // 刪除只是標記隱藏：一般只看沒被隱藏的；GM 打開「顯示已隱藏」時，日誌清單與魔王選單才會列出來（統計一律不算）
@@ -554,13 +568,18 @@ function noBossCard(el) {
     ${!has && ui.canRecord ? '<button class="btn primary" id="first-boss">＋ 新增第一隻魔王</button>' : ''}</div>`;
   $('#first-boss', el)?.addEventListener('click', () => openBossEditor());
 }
-window.addEventListener('hashchange', () => {
-  const id = bossFromHash();
-  if (id && id !== ui.bossId) { ui.bossId = id; storage.set('maou-log:boss', id); render(); }
-});
-function selectBoss(id) {
+// 切換魔王的唯一入口：真的換了魔王才把時光機歸零（不沿用到另一隻魔王）
+function setBoss(id) {
+  if (id !== ui.bossId) { ui.offset = 0; ui.customAt = null; }
   ui.bossId = id;
   storage.set('maou-log:boss', id);
+}
+window.addEventListener('hashchange', () => {
+  const id = bossFromHash();
+  if (id && id !== ui.bossId) { setBoss(id); render(); }
+});
+function selectBoss(id) {
+  setBoss(id);
   history.replaceState(null, '', `#b=${encodeURIComponent(id)}`);
   render();
 }
@@ -569,7 +588,7 @@ function selectBoss(id) {
 function renderBossBar() {
   const today = todayKey();
   const chips = visibleBosses().map((b) => {
-    const last = bossEvents(b.id).filter((e) => R.dateKey(e.at) === today).sort((x, y) => y.at - x.at)[0];
+    const last = bossEvents(b.id).filter((e) => R.dateKey(e.at) === today && !isRumor(e)).sort((x, y) => y.at - x.at)[0];
     const icon = b.deleted ? '🗑️' : last ? R.STATUSES[last.status].emoji : '💤';
     return `<button class="boss-chip ${b.deleted ? 'gone' : ''}" data-boss="${esc(b.id)}" aria-pressed="${b.id === ui.bossId}">${icon} <span class="lvl">Lv.${b.level}</span> ${esc(b.name)}</button>`;
   }).join('');
@@ -602,11 +621,11 @@ function openBossEditor(boss) {
       if (!Number.isInteger(level) || level < 1 || level > 999) { toast('等級請填 1–999 的整數'); return; }
       try {
         if (boss) await store.updateBoss(boss.id, { level, name, note });
-        else { const b = await store.addBoss({ level, name, note }); ui.bossId = b.id; }
+        else { const b = await store.addBoss({ level, name, note }); selectBoss(b.id); }
       } catch (err) { toast(err.message); return; }
       closeSheet();
       toast('已儲存');
-      selectBoss(ui.bossId);
+      render();
     };
     $('#b-cancel', el)?.addEventListener('click', closeSheet);
     $('#b-del', el)?.addEventListener('click', async (e) => {
@@ -659,7 +678,7 @@ function drawSprite() {
 }
 
 function latestEvent() {
-  return bossEvents().sort((a, b) => b.at - a.at)[0] || null;
+  return bossEvents().filter((e) => !isRumor(e)).sort((a, b) => b.at - a.at)[0] || null;
 }
 
 // ---------- 共用 UI ----------
@@ -781,7 +800,7 @@ function eventVars(ev, note) {
     旁白: note ?? ev.note ?? '',
     上線時間: R.fmtMin(day.arrival),
     可下線: R.fmtMin(day.expectedLeave),
-    今日上線: R.fmtDuration(day.workMinutes),
+    觀察時數: R.fmtDuration(day.workMinutes),
     晚上線: lateText(day),
     失誤: R.faultText(day),
     假別: '', 時段: '',
@@ -790,7 +809,7 @@ function eventVars(ev, note) {
 
 function leaveVars(lv) {
   const span = R.leaveSpanText(lv);
-  return { 魔王: bossName(), 狀態: '閉關', 時間: '', 日期: fmtDate(lv.date), 旁白: lv.note || '', 上線時間: '', 可下線: '', 今日上線: '', 晚上線: '', 失誤: '', 假別: lv.type, 時段: span };
+  return { 魔王: bossName(), 狀態: '閉關', 時間: '', 日期: fmtDate(lv.date), 旁白: lv.note || '', 上線時間: '', 可下線: '', 觀察時數: '', 晚上線: '', 失誤: '', 假別: lv.type, 時段: span };
 }
 
 // LINE 的分享網址只有手機能用；電腦版改成複製文字（iPadOS 會偽裝成 Mac，用觸控點數判斷）
@@ -846,8 +865,17 @@ function pickTime() {
   return Date.now() - ui.offset * 60000; // 保留秒數：同一分鐘內連續記錄也能排出先後
 }
 
-async function recordStatus(status) {
-  const at = pickTime();
+// 傳聞必須寫旁白（記錄與補登共用）
+function rumorNoteMissing(status, note) {
+  if (!R.STATUSES[status]?.rumor || String(note || '').trim()) return false;
+  toast('傳聞要寫旁白：誰說了什麼');
+  return true;
+}
+
+// now：不看時光機，一律用現在的時間（在家修煉的日子沒有時光機）
+async function recordStatus(status, { now = false } = {}) {
+  if (rumorNoteMissing(status, ui.note)) { $('#note')?.focus(); return; }
+  const at = now ? Date.now() : pickTime();
   if (!Number.isFinite(at)) { toast('時間格式不正確'); return; }
   if (at > Date.now() + 60000) { toast('時間不能在未來'); return; }
   const note = ui.note.trim();
@@ -889,6 +917,7 @@ function renderRecord() {
   const boss = currentBoss();
   if (!boss) { noBossCard($('#view-record')); return; }
   const who = `<span class="lv">Lv.${boss.level}</span> ${esc(boss.name)}`;
+  const rumorCount = rumors().length;
   const goneNote = boss.deleted ? '<div class="banner"><span class="small">🗑️ 這隻魔王已隱藏，只能查看不能記錄</span></div>' : '';
 
   $('#view-record').innerHTML = `
@@ -908,9 +937,9 @@ function renderRecord() {
       ${day.remote ? '<div class="boss-note" style="border-left-color:var(--cyan)">🏠 在家修煉：照班表計算，不記錄上下線時間</div>' : ''}
       ${day.arrival != null && !day.remote ? `
       <div class="facts">
-        <div class="fact"><div class="k">上線</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
-        <div class="fact"><div class="k">可下線</div><div class="v">${R.fmtMin(day.expectedLeave)}</div></div>
-        <div class="fact"><div class="k">今日上線</div><div class="v">${R.fmtDuration(day.workMinutes)}</div></div>
+        <div class="fact"><div class="k">最早遇見</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
+        <div class="fact"><div class="k">最後遇見</div><div class="v">${cur ? `${R.fmtMin(R.minutesOf(cur.at))}<span class="small muted" style="font-weight:400">（${st.label}）</span>` : '—'}</div></div>
+        <div class="fact"><div class="k">觀察時數</div><div class="v">${R.fmtDuration(day.workMinutes)}</div></div>
       </div>
       <div class="bar-label"><span>EXP</span><span class="num">${Math.round(exp)}%</span></div>
       <div class="hp"><div style="width:${exp}%"></div></div>
@@ -918,11 +947,15 @@ function renderRecord() {
       ${boss.note || canWrite() || boss.history?.length ? `<div class="boss-note"><span class="t">📜 ${boss.note ? esc(boss.note) : '<span class="muted">還沒有屬性備註</span>'}${historyHTML(boss, 'boss')}</span>
         ${canWrite() ? '<button class="btn sm" id="edit-boss">✏️ 編輯</button>' : ''}</div>` : ''}
       <button class="btn line block" id="share-now" style="margin-top:14px">📣 分享目前狀態到 LINE</button>
+      ${rumorCount ? `<button class="btn block" id="rumor-list" style="margin-top:10px">🗣️ 傳聞一覽（${rumorCount}）</button>` : ''}
     </div>
 
     ${canWrite() && day.remote ? `<div class="card"><div class="small">🏠 今天在家修煉，不再更新狀態。</div>
-      <div class="small muted" style="margin-top:6px">記錯了的話，可以在下方日誌修改${ui.canEdit ? '或刪除' : ''}那一筆。</div>
-      <button class="btn sm" id="add-leave" style="margin-top:10px">🏝️ 登記閉關</button></div>` : ''}
+      <div class="small muted" style="margin-top:6px">記錯了的話，可以在下方日誌修改${ui.canEdit ? '或刪除' : ''}那一筆。聽到的傳聞照常可以記錄。</div>
+      <label class="f" style="margin:12px 0 8px"><span>旁白（記傳聞時必填）</span>
+        <input type="text" id="note" placeholder="誰說了什麼" maxlength="100" value="${esc(ui.note)}"></label>
+      <div class="row wrap-row"><button class="btn sm" data-status="rumor">🗣️ 記錄傳聞</button>
+        <button class="btn sm" id="add-leave">🏝️ 登記閉關</button></div></div>` : ''}
 
     ${canWrite() && !day.remote ? `<div class="card">
       <h2>時光機</h2>
@@ -940,11 +973,11 @@ function renderRecord() {
       <div class="status-grid">
         ${Object.entries(R.STATUSES).map(([k, s]) => `
           <button class="status-btn ${cur?.status === k ? 'current' : ''}" style="--c:${s.color}" data-status="${k}">
-            <span class="e">${s.emoji}</span><span class="t">${s.label}</span></button>`).join('')}
+            <span class="e">${s.emoji}</span><span class="t">${s.short || s.label}</span></button>`).join('')}
         <button class="status-btn leave-btn" id="add-leave"><span class="e">🏝️</span><span class="t">閉關</span></button>
       </div>
       <label class="f" style="margin:12px 0 0"><span>旁白（選填）</span>
-        <input type="text" id="note" placeholder="例如：出門打怪" maxlength="100" value="${esc(ui.note)}"></label>
+        <input type="text" id="note" placeholder="例如：出門打怪（記傳聞時必填）" maxlength="100" value="${esc(ui.note)}"></label>
     </div>` : ''}
 
     ${ui.showHidden && ui.isEditor ? '<div class="banner"><span class="small">👁 正在顯示已隱藏的紀錄（只有 GM 看得到）</span><span class="spacer"></span><button class="btn sm" id="hide-hidden">關閉</button></div>' : ''}
@@ -953,10 +986,16 @@ function renderRecord() {
 
   bindEventList($('#view-record'));
   $('#share-now').onclick = shareNow;
+  $('#rumor-list')?.addEventListener('click', openRumors);
   $('#hide-hidden')?.addEventListener('click', toggleShowHidden);
   if (!canWrite()) return;
   $('#edit-boss').onclick = () => openBossEditor(boss);
-  if (day.remote) { $('#add-leave').onclick = () => openLeaveEditor(today); return; } // 在家修煉的日子不能再記錄狀態，但可以登記閉關
+  if (day.remote) { // 在家修煉的日子不能再記錄狀態，但可以記傳聞、登記閉關
+    $('#add-leave').onclick = () => openLeaveEditor(today);
+    $('#note').addEventListener('input', (e) => { ui.note = e.target.value; });
+    $('[data-status="rumor"]').onclick = () => recordStatus('rumor', { now: true });
+    return;
+  }
   $$('#offsets .chip').forEach((b) => b.onclick = () => {
     const v = b.dataset.v;
     ui.offset = v === 'custom' ? 'custom' : Number(v);
@@ -995,14 +1034,14 @@ function bindEventList(root, back) {
 }
 
 // ---------- 紀錄編輯 ----------
-function openEventEditor({ date, ev, preset = {}, back }) {
+function openEventEditor({ date, ev, preset = {}, back, onlyRumor = false }) {
   const time = ev ? R.fmtMin(R.minutesOf(ev.at)) : (preset.time || R.fmtMin(nowMin()));
   const status = ev?.status || preset.status || 'work';
   openSheet(`
     <h3>${ev ? '修改紀錄' : '補登紀錄'}・${fmtDate(date)}</h3>
     <label class="f"><span>時間</span><input type="time" id="e-time" value="${time}"></label>
     <label class="f"><span>狀態</span><select id="e-status">
-      ${Object.entries(R.STATUSES).map(([k, s]) => `<option value="${k}" ${k === status ? 'selected' : ''}>${s.emoji} ${s.label}</option>`).join('')}
+      ${Object.entries(R.STATUSES).filter(([k]) => !onlyRumor || R.STATUSES[k].rumor).map(([k, s]) => `<option value="${k}" ${k === status ? 'selected' : ''}>${s.emoji} ${s.label}</option>`).join('')}
     </select></label>
     <label class="f"><span>旁白</span><input type="text" id="e-note" value="${esc(ev?.note || '')}" maxlength="100"></label>
     <div class="sheet-actions">
@@ -1016,6 +1055,7 @@ function openEventEditor({ date, ev, preset = {}, back }) {
       if (!/^\d{2}:\d{2}$/.test($('#e-time', el).value) || !Number.isFinite(at)) { toast('請輸入時間'); return; }
       if (at > Date.now() + 60000) { toast('時間不能在未來'); return; }
       const patch = { at, status: $('#e-status', el).value, note: $('#e-note', el).value.trim() };
+      if (rumorNoteMissing(patch.status, patch.note)) return;
       try {
         if (ev) await store.updateEvent(ev.id, patch); else await store.addEvent({ ...patch, boss: ui.bossId });
       } catch (err) { toast(err.message); return; }
@@ -1111,7 +1151,7 @@ function bindMonthNav(root, rerender) {
 }
 
 function dayCellText(d) {
-  if (d.remote) return '在家修煉';
+  if (d.remote || d.remoteHoliday) return '在家修煉';
   if (d.state === 'leave') return d.leaves[0]?.type || '休假';
   if (d.state === 'holiday') return d.reason && d.reason !== '假日' ? d.reason : '';
   if (d.arrival != null) return R.fmtMin(d.arrival);
@@ -1135,7 +1175,7 @@ function renderCalendar() {
         ${days.map((d) => {
           const ds = R.displayState(d);
           const c = R.DAY_STATES[ds];
-          const off = !d.workday && d.state !== 'extra';
+          const off = !d.workday && d.state !== 'extra' && !d.remoteHoliday;
           return `<button class="d ${off ? 'off' : ''} ${d.date === today ? 'today' : ''}" data-day="${d.date}">
             <span class="n">${Number(d.date.slice(8))}</span>
             <span class="s num">${esc(dayCellText(d))}</span>
@@ -1173,15 +1213,14 @@ function openDay(date) {
   const fact = (k, v, bad) => `<div class="fact"><div class="k">${k}</div><div class="v ${bad ? 'bad' : ''}">${v}</div></div>`;
   openSheet(`
     <h3>${fmtDate(date, true)} <span class="muted small">${esc(stLabel)}${info.reason ? '・' + esc(info.reason) : ''}</span></h3>
-    ${d.remote ? `<div class="boss-note" style="margin-top:0">🏠 在家修煉：照班表計算，不記錄上下線時間（上線時數 ${R.fmtDuration(d.workMinutes)}）</div>` : ''}
-    ${d.events.length && !d.remote ? `
+    ${d.remote ? `<div class="boss-note" style="margin-top:0">🏠 在家修煉：照班表計算，不記錄上下線時間（觀察時數 ${R.fmtDuration(d.workMinutes)}）</div>` : ''}
+    ${d.arrival != null && !d.remote ? `
       <div class="facts" style="margin-top:0">
-        ${fact('上線', R.fmtMin(d.arrival), d.lateMinutes > 0)}
+        ${fact('最早遇見', R.fmtMin(d.arrival), d.lateMinutes > 0)}
         ${fact('下線', d.departure != null ? R.fmtMin(d.departure) : '未見', d.earlyMinutes > 0)}
-        ${fact('可下線', R.fmtMin(d.expectedLeave))}
-        ${fact('上線時數', R.fmtDuration(d.workMinutes))}
+        ${fact('觀察時數', R.fmtDuration(d.workMinutes))}
         ${fact('吃飯', R.fmtDuration(d.lunchMinutes))}
-        ${fact('離開王座', d.awayCount ? `${d.awayCount} 次` : '—')}
+        ${fact('王座無人', d.awayCount ? `${d.awayCount} 次` : '—')}
         ${fact('睡眠補血', d.napCount ? R.fmtDuration(d.napMinutes) : '—')}
       </div>
       <div class="small" style="margin-top:8px">
@@ -1193,7 +1232,7 @@ function openDay(date) {
 
     <div class="card" style="margin-top:12px">
       <div class="row"><h2 style="margin:0">冒險者觀察日誌</h2><span class="spacer"></span>
-        ${canWrite() && !d.remote ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}${canWrite() ? '<button class="btn sm" id="d-leave" style="margin-left:6px">＋ 閉關</button>' : ''}</div>
+        ${canWrite() ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}${canWrite() ? '<button class="btn sm" id="d-leave" style="margin-left:6px">＋ 閉關</button>' : ''}</div>
       ${d.events.length || d.leaves.length || hiddenEvents(d.date).length || hiddenLeaves(d.date).length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
     </div>
 
@@ -1207,7 +1246,10 @@ function openDay(date) {
     const back = () => openDay(date);
     $('#d-close', el).onclick = closeSheet;
     if (!canWrite()) return;
-    $('#d-add', el)?.addEventListener('click', () => openEventEditor({ date, back, preset: d.events.length ? { status: 'off', time: R.fmtMin(R.SCHEDULE.end) } : { status: 'work', time: '09:00' } }));
+    $('#d-add', el)?.addEventListener('click', () => openEventEditor({
+      date, back, onlyRumor: d.remote, // 在家修煉的日子只能補登傳聞
+      preset: d.remote ? { status: 'rumor' } : d.arrival != null ? { status: 'off', time: R.fmtMin(R.SCHEDULE.end) } : { status: 'work', time: '09:00' },
+    }));
     $('#d-leave', el).onclick = () => openLeaveEditor(date, back);
     bindEventList(el, back);
     $('#d-ov', el)?.addEventListener('click', async () => { await store.setOverride(date, info.workday ? 'holiday' : 'workday'); render(); back(); });
@@ -1249,8 +1291,8 @@ function renderStats() {
       ${tile('早下線', `${s.earlyCount}<small>次</small>`, s.earlyCount ? `共 ${R.fmtDuration(s.earlyMinutes)}` : '只算有看到下線的天數')}
       ${tile('平均上線', R.fmtMin(s.avgArrival))}
       ${tile('平均下線', R.fmtMin(s.avgDeparture))}
-      ${tile('上線時數', hrs(s.workMinutes), `目標 ${Math.round(s.requiredMinutes / 6) / 10} 小時（${s.completeDays} 個通關日）${s.requiredMinutes ? `・達成 ${Math.round((s.workMinutes / s.requiredMinutes) * 100)}%` : ''}`, true)}
-      ${tile('離開王座', `${s.awayCount}<small>次</small>`, s.awayCount ? `共 ${R.fmtDuration(s.awayMinutes)}` : '')}
+      ${tile('觀察時數', hrs(s.workMinutes), `目標 ${Math.round(s.requiredMinutes / 6) / 10} 小時（${s.completeDays} 個通關日）${s.requiredMinutes ? `・達成 ${Math.round((s.workMinutes / s.requiredMinutes) * 100)}%` : ''}`, true)}
+      ${tile('王座無人', `${s.awayCount}<small>次</small>`, s.awayCount ? `共 ${R.fmtDuration(s.awayMinutes)}` : '')}
       ${tile('睡眠補血', `${s.napCount}<small>次</small>`, s.napCount ? `共 ${R.fmtDuration(s.napMinutes)}` : '')}
       ${tile('發呆摸魚', `${s.slackCount}<small>次</small>`, s.slackCount ? `共 ${R.fmtDuration(s.slackMinutes)}` : '')}
       ${s.remoteDays ? tile('在家修煉', `${s.remoteDays}<small>天</small>`, '照班表計算，不列入上線時刻') : ''}
@@ -1310,7 +1352,7 @@ function download(name, text, type) {
 }
 
 function downloadCSV(days) {
-  const head = ['日期', '星期', '日別', '狀態', '上線', '下線', '可下線', '遲到(分)', '早退(分)', '加時(分)', '上線時數(分)', '吃飯(分)', '離開王座(次)', '離開王座(分)', '睡眠補血(分)', '發呆摸魚(分)', '閉關', '紀錄明細'];
+  const head = ['日期', '星期', '日別', '狀態', '最早遇見', '下線', '遲到(分)', '早退(分)', '加時(分)', '觀察時數(分)', '吃飯(分)', '王座無人(次)', '王座無人(分)', '睡眠補血(分)', '發呆摸魚(分)', '閉關', '紀錄明細'];
   // 以 = + - @ 開頭的內容加上 ' 避免 Excel 當成公式執行
   const q = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; };
   const rows = days.filter((d) => d.state !== 'future').map((d) => [
@@ -1318,7 +1360,6 @@ function downloadCSV(days) {
     R.displayState(d) === 'late' ? '失誤（遲到／早退）' : R.DAY_STATES[R.displayState(d)].label,
     // 在家修煉觀察不到上下線，不輸出時間
     d.arrival != null && !d.remote ? R.fmtMin(d.arrival) : '', d.departure != null && !d.remote ? R.fmtMin(d.departure) : '',
-    d.expectedLeave != null && !d.remote ? R.fmtMin(d.expectedLeave) : '',
     d.lateMinutes, d.earlyMinutes, d.overtimeMinutes, d.workMinutes, d.lunchMinutes, d.awayCount, d.awayMinutes, d.napMinutes, d.slackMinutes,
     d.leaves.map((l) => `${l.type}・${R.leaveSpanText(l, '-')}`).join('；'),
     d.events.map((e) => { const lg = loggedText(e, e.at); const rp = reporterText(e); return `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status].label}${e.note ? `(${e.note})` : ''}${lg ? `[${lg}]` : ''}${rp ? `[情報 ${rp}]` : ''}`; }).join('；'),
@@ -1467,7 +1508,7 @@ function tutorialSteps(kind) {
   const viewer = [
     { text: '歡迎來到「魔王出沒紀錄」！我是嚮導，帶你走一圈。這裡記錄每隻魔王每天的出沒動態。' },
     { target: '#boss-bar', text: '先從這裡選一隻要觀戰的魔王。沒有選魔王的話，什麼資料都看不到喔。' },
-    { tab: 'record', target: '#view-record .now', text: '這裡是魔王目前的狀態：現在在做什麼、幾點上線、今天上線多久。' },
+    { tab: 'record', target: '#view-record .now', text: '這裡是魔王目前的狀態：現在在做什麼、最後遇見的時間、今天觀察了多久。' },
     { tab: 'record', target: '#share-now', text: '按這顆按鈕，就能把魔王的動態傳給你的 LINE 好友。電腦版會改成複製文字，貼到 LINE 就好。' },
     { target: 'nav.tabs', text: '下方切換頁面：「地圖」看每天的狀況，「成就」看遲到、早退等統計，「選單」有更多設定。' },
     { target: '#online', text: '右上角是目前同時在線的冒險者人數，沒登入的也算。' },
@@ -1476,7 +1517,7 @@ function tutorialSteps(kind) {
   const gm = [
     { text: '登入成功！接下來介紹提供情報（記錄魔王）的方法。' },
     { rec: true, tab: 'record', target: '#offsets', text: '「時光機」：如果晚了幾分鐘才記錄，先選「5 分前」之類的時間再按狀態。' },
-    { rec: true, tab: 'record', target: '#view-record .status-grid', text: '看到魔王在做什麼，就按對應的狀態。記錄後可以順手廣播給隊友。' },
+    { rec: true, tab: 'record', target: '#view-record .status-grid', text: '看到魔王在做什麼，就按對應的狀態。聽別人說的就按「傳聞」，旁白寫下誰說了什麼。記錄後可以順手廣播給隊友。' },
     { rec: true, tab: 'record', target: '#add-leave', text: '魔王請假就登記「閉關」，可以是全天、半天或自訂時段，也能事先登記。' },
     { target: '#role', text: '點這個徽章可以切到觀戰模式，把編輯按鈕藏起來，避免誤觸。記錯的情報可以修改，刪除則交給 GM。' },
   ];

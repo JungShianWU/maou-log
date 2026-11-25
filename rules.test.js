@@ -136,6 +136,27 @@ test('發呆摸魚：算上線時數，另計次數與時間', () => {
   assert.equal(s.slackMinutes, 40);
 });
 
+test('傳聞：不改變狀態、不算時數，但會留在日誌', () => {
+  const r = day([['09:00', 'work'], ['10:00', 'rumor'], ['18:00', 'off']]);
+  assert.equal(r.workMinutes, 480);
+  assert.equal(r.events.length, 3);
+  assert.equal(r.segments.length, 2);
+  // 只有傳聞的日子＝無情報
+  assert.equal(day([['10:00', 'rumor']]).state, 'noRecord');
+});
+
+test('休戰日在家修煉：不算假日加場，地圖顯示在家修煉', () => {
+  const r = day([['10:00', 'remote']], { workday: false });
+  assert.equal(r.state, 'holiday');
+  assert.equal(r.remoteHoliday, true);
+  assert.equal(r.remote, false); // 不鎖記錄（人可能後來進公司）
+  assert.equal(day([['10:00', 'work']], { workday: false }).state, 'extra');
+});
+
+test('範本舊變數 {今日上線} 對應到 {觀察時數}', () => {
+  assert.equal(renderTemplate('今日上線：{今日上線}', { 觀察時數: '3 小時' }), '今日上線：3 小時');
+});
+
 test('過去日沒有下班紀錄 → missingOff', () => {
   assert.equal(day([['09:00', 'work']]).state, 'missingOff');
 });

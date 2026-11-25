@@ -145,8 +145,10 @@ service cloud.firestore {
             && common(request.resource.data)
             && isBossRef(request.resource.data.boss)
             && request.resource.data.at is number
-            && request.resource.data.status in ['work', 'remote', 'makeup', 'lunch', 'away', 'back', 'nap', 'slack', 'off']
-            && isText(request.resource.data.note, 100);
+            && request.resource.data.status in ['work', 'remote', 'makeup', 'lunch', 'away', 'back', 'nap', 'slack', 'rumor', 'off']
+            && isText(request.resource.data.note, 100)
+            // 傳聞必須寫旁白（誰說了什麼）
+            && (request.resource.data.status != 'rumor' || request.resource.data.note.matches('(?s).*\\S.*'));
         }
         allow read: if true;
         allow delete: if false;

@@ -33,10 +33,12 @@ export const STATUSES = {
   remote: { label: '在家修煉', emoji: '🏠', working: true,  color: '#73eff7' }, // 遠端上班
   makeup: { label: '化妝',     emoji: '💄', working: true,  color: '#5d275d' },
   lunch:  { label: '吃飯',     emoji: '🍖', working: false, color: '#ef7d57' },
-  away:   { label: '離開王座', emoji: '🚪', working: true,  color: '#3b5dc9' },
-  back:   { label: '回到王座', emoji: '🪑', working: true,  color: '#38b764' },
+  away:   { label: '王座無人', emoji: '🚪', working: true,  color: '#3b5dc9' },
+  back:   { label: '在王座上', emoji: '🪑', working: true,  color: '#38b764' },
   nap:    { label: '睡眠補血', emoji: '😴', working: true,  color: '#257179' },
   slack:  { label: '發呆摸魚', emoji: '🐟', working: true,  color: '#41a6f6' }, // 人在位子上，算上線時數
+  // 傳聞：記錄其他觀察者轉述的話，不改變魔王的狀態，旁白必填
+  rumor:  { label: '其他觀察者說的話（傳聞）', short: '傳聞', emoji: '🗣️', working: false, color: '#a7f070', rumor: true },
   off:    { label: '下線',     emoji: '🌙', working: false, color: '#566c86' },
 };
 
@@ -225,11 +227,13 @@ export function evaluateSchedule(arrival, leaves = []) {
 
 // events: 該日的狀態紀錄 [{ at: ms, status }]，leaves: 該日休假
 export function evaluateDay({ date, events = [], leaves = [], workday = true, today, nowMin }) {
-  const evs = [...events].sort((a, b) => a.at - b.at);
+  const all = [...events].sort((a, b) => a.at - b.at);
+  // 傳聞只是轉述，不算魔王的狀態（不影響時段、上線、統計）
+  const evs = all.filter((e) => !STATUSES[e.status]?.rumor);
   const isToday = date === today;
   const isFuture = date > today;
   const result = {
-    date, workday, events: evs, leaves, isFuture,
+    date, workday, events: all, leaves, isFuture,
     leaveDays: leaves.reduce((s, l) => s + leaveDays(l), 0),
     segments: [],
     arrival: null, departure: null,
@@ -239,7 +243,8 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
     slackCount: 0, slackMinutes: 0,
     lateMinutes: 0, earlyMinutes: 0, overtimeMinutes: 0,
     expectedLeave: null, lateAt: null,
-    remote: false,
+    remote: false,        // 冒險日在家修煉：照班表、不能再記錄狀態
+    remoteHoliday: false, // 休戰日在家修煉：只在地圖上顯示，不鎖記錄
     requiredMinutes: 0,
     state: 'noRecord',
   };
@@ -270,7 +275,9 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
 
   // 狀態判定
   const fullLeave = evaluateSchedule(0, leaves).fullLeave;
-  if (!workday) result.state = evs.length ? 'extra' : 'holiday';
+  const remoteToday = evs.some((e) => e.status === 'remote');
+  // 休戰日在家修煉不算「假日加場」
+  if (!workday) result.state = evs.length && !remoteToday ? 'extra' : 'holiday';
   else if (fullLeave) result.state = 'leave';
   else if (!firstIn) result.state = isFuture ? 'future' : isToday ? 'pending' : 'noRecord';
   else if (result.departure == null) result.state = isToday ? 'inProgress' : 'missingOff';
@@ -291,7 +298,8 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
   }
 
   // 在家修煉（遠端上班）：當天視為照班表完整上班，不計失誤與加時
-  if (workday && !fullLeave && evs.some((e) => e.status === 'remote')) {
+  if (!workday && remoteToday) result.remoteHoliday = true; // 地圖顯示「在家修煉」
+  if (workday && !fullLeave && remoteToday) {
     Object.assign(result, {
       remote: true, state: 'complete',
       lateMinutes: 0, earlyMinutes: 0, overtimeMinutes: 0,
@@ -310,14 +318,14 @@ export const DAY_STATES = {
   leave:      { label: '閉關',         color: '#a35dd8' },
   noRecord:   { label: '無情報',       color: '#566c86' },
   holiday:    { label: '休戰日',       color: '#333c57' },
-  extra:      { label: '假日加場',     color: '#73eff7' },
+  extra:      { label: '假日加場',     color: '#ffcd75' },
   pending:    { label: '今天',         color: '#566c86' },
   future:     { label: '',             color: 'transparent' },
 };
 
 // 月曆顏色用：正常但有遲到或早退時改成紅色
 export function displayState(day) {
-  if (day.remote) return 'remote';
+  if (day.remote || day.remoteHoliday) return 'remote';
   if (day.state === 'complete' && (day.lateMinutes > 0 || day.earlyMinutes > 0)) return 'late';
   if (day.state === 'inProgress' && day.lateMinutes > 0) return 'late';
   return day.state;
@@ -400,7 +408,7 @@ export function faultText(day) {
 }
 
 // 舊變數名稱仍可使用
-const VAR_ALIASES = { 備註: '旁白', 遲到: '晚上線', 到班時間: '上線時間', 應下班: '可下線', 今日工時: '今日上線' };
+const VAR_ALIASES = { 備註: '旁白', 遲到: '晚上線', 到班時間: '上線時間', 應下班: '可下線', 今日工時: '觀察時數', 今日上線: '觀察時數' };
 
 // 一行裡的變數全部沒資料時，整行不顯示（例如「旁白：{旁白}」沒填旁白就整行拿掉）
 export function renderTemplate(tpl, vars) {
@@ -417,12 +425,13 @@ export const DEFAULT_TEMPLATES = {
   remote: '🏠 {魔王} 在家修煉中（{時間}）\n{失誤}\n{旁白}',
   makeup: '💄 {魔王} 化妝中…（{時間}）\n{旁白}',
   lunch: '🍖 {魔王} 吃飯中（{時間}）\n{旁白}',
-  away: '🚪 {魔王} 離開王座（{時間}）\n{旁白}',
-  back: '🪑 {魔王} 回到王座（{時間}）\n{旁白}',
+  away: '🚪 {魔王} 王座無人（{時間}）\n{旁白}',
+  back: '🪑 {魔王} 在王座上（{時間}）\n{旁白}',
+  rumor: '🗣️ 傳聞（{魔王}・{時間}）：{旁白}',
   nap: '😴 {魔王} 睡眠補血中…（{時間}）\n{旁白}',
   slack: '🐟 {魔王} 發呆摸魚中…（{時間}）\n{旁白}',
-  off: '🌙 {魔王} 下線了（{時間}）\n今日上線：{今日上線}\n{失誤}\n{旁白}',
+  off: '🌙 {魔王} 下線了（{時間}）\n觀察時數：{觀察時數}\n{失誤}\n{旁白}',
   leave: '🏝️ {魔王} {日期}閉關（{假別}・{時段}）\n{旁白}',
 };
 
-export const TEMPLATE_VARS = ['魔王', '狀態', '時間', '日期', '旁白', '上線時間', '可下線', '今日上線', '晚上線', '失誤', '假別', '時段'];
+export const TEMPLATE_VARS = ['魔王', '狀態', '時間', '日期', '旁白', '上線時間', '可下線', '觀察時數', '晚上線', '失誤', '假別', '時段'];

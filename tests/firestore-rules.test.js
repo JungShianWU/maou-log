@@ -186,6 +186,11 @@ test('日誌：by 必須是寫入者本人', async () => {
 test('日誌：在家修煉（remote）、發呆摸魚（slack）是合法狀態', async () => {
   await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/r'), event({ status: 'remote' })));
   await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/s'), event({ status: 'slack' })));
+  // 傳聞：旁白必填
+  await assertFails(setDoc(doc(editor(), 'boards/main/events/u1'), event({ status: 'rumor', note: '' })));
+  await assertFails(setDoc(doc(editor(), 'boards/main/events/u3'), event({ status: 'rumor', note: '   ' })));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/u4'), event({ status: 'rumor', note: '甲說\n乙說' })));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/u2'), event({ status: 'rumor', note: '聽說他今天要開會' })));
 });
 
 test('記錄時間 loggedAt：選填，必須是數字', async () => {

@@ -92,7 +92,8 @@ function sanitize(d, fallbackBoss = null) {
   if (fallbackBoss) ids.add(fallbackBoss);
   const owner = (x) => (x.boss === undefined ? fallbackBoss : x.boss);
   const events = (Array.isArray(d.events) ? d.events : [])
-    .filter((e) => e && ids.has(owner(e)) && Object.hasOwn(STATUSES, e.status) && Number.isFinite(e.at))
+    .filter((e) => e && ids.has(owner(e)) && Object.hasOwn(STATUSES, e.status) && Number.isFinite(e.at)
+      && !(STATUSES[e.status].rumor && !str(e.note).trim())) // 傳聞必須有旁白（規則也會擋）
     .map((e) => ({ boss: owner(e), at: e.at, status: e.status, note: str(e.note), ...logged(e), ...keepReporter(e), ...keepHistory(e, 'events') }));
   const leaves = (Array.isArray(d.leaves) ? d.leaves : [])
     .filter((l) => l && ids.has(owner(l)) && isDate(l.date) && Object.hasOwn(LEAVE_KINDS, l.kind)
@@ -280,7 +281,15 @@ async function writeData(clean, { settings, existingBosses = new Map() }) {
 // ---------- 對外介面 ----------
 
 // 登入後把自己登記到冒險者清單（只存去識別化的 email；第一次登入時間保留）
-async function registerAdventurer(user) {
+// 同一個帳號同時只登記一次（登入與「註冊剛打開」可能同時觸發）
+const registering = new Map();
+function registerAdventurer(user) {
+  if (!registering.has(user.uid)) {
+    registering.set(user.uid, doRegister(user).finally(() => registering.delete(user.uid)));
+  }
+  return registering.get(user.uid);
+}
+async function doRegister(user) {
   await ready; // 等註冊開關等設定載入（開站時登入狀態可能比設定先回來）
   const ref = doc(db, 'adventurers', user.uid);
   const masked = maskEmail(user.email);
