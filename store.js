@@ -41,7 +41,17 @@ const CAL_KEY = (y) => `maou-log:calendar:${y}`;
 
 const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const isHHMM = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
-const str = (v, max = 100) => (typeof v === 'string' ? v.slice(0, max) : '');
+// 長度上限以 UTF-16 單位計算（與 Firestore 規則的 size()、輸入框 maxlength 一致），
+// 但只在完整字元之間截斷，不會把 emoji 切成半個
+function str(v, max = 100) {
+  if (typeof v !== 'string') return '';
+  let out = '';
+  for (const ch of v) {
+    if (out.length + ch.length > max) break;
+    out += ch;
+  }
+  return out;
+}
 
 // 只留格式正確的資料，其餘丟掉（存檔可能被改過）
 const isId = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v);

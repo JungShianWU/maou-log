@@ -649,7 +649,7 @@ $$('.controls [data-key]').forEach((b) => b.addEventListener('click', () => pres
 const KEYMAP = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', Z: 'a', x: 'b', X: 'b', Escape: 'b', Enter: 'start', Shift: 'select' };
 document.addEventListener('keydown', (e) => {
   const key = KEYMAP[e.key];
-  if (!key || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!key || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return; // 按住不放不連續觸發（例如按住 Shift 會一直換魔王）
   const el = document.activeElement;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(el?.tagName) || el?.isContentEditable;
   if (typing && e.key !== 'Escape') return;                          // 打字時只保留 Esc 關閉
@@ -1266,6 +1266,7 @@ function renderSettings() {
     if (!f) return;
     try { const r = await store.importJSON(await f.text()); toast(r.skipped ? `讀取完成，略過 ${r.skipped} 筆格式不正確的資料` : '讀取完成'); render(); }
     catch (err) { toast('讀取失敗：' + (err.code || err.message)); }
+    finally { e.target.value = ''; } // 清掉選擇，失敗後才能重選同一個檔案
   };
   $('#bk-clear').onclick = (e) => {
     const b = e.currentTarget;

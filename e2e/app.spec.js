@@ -2,6 +2,7 @@
 // 帳號與資料都在模擬器裡，不會碰到正式資料
 import { test, expect } from '@playwright/test';
 import { EDITOR_UIDS } from '../firebase-config.js';
+import { VERSION } from '../version.js';
 
 const PROJECT = 'maou-log-jt2c4';
 const AUTH = 'http://127.0.0.1:9099';
@@ -71,7 +72,7 @@ test('觀戰模式：不用登入就能看，看不到任何編輯功能', async
   await expect(page.locator('#login')).toBeVisible();
   await expect(page.locator('[data-tpl]')).toHaveCount(0);
   await expect(page.locator('#bk-export')).toHaveCount(0);
-  await expect(page.locator('#view-settings')).toContainText('v1.0.0');
+  await expect(page.locator('#view-settings')).toContainText(`v${VERSION}`);
 });
 
 test('沒有選擇魔王時看不到任何資料', async ({ page, request }) => {
@@ -400,4 +401,36 @@ test('在家修煉：整天照班表計算，地圖與成就都標示', async ({
   await expect(page.locator('#view-stats')).toContainText('在家修煉');
   await expect(page.locator('#view-stats .tile', { hasText: '晚上線' })).toContainText('0');
   await expect(page.locator('.arr')).toContainText('🏠 在家修煉');
+});
+
+test('按住按鍵不會連續觸發（按住 Shift 不會一直換魔王）', async ({ page }) => {
+  await open(page);
+  await expect(chip(page, 30)).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => {
+    for (let i = 0; i < 5; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', repeat: i > 0, bubbles: true }));
+    }
+  });
+  // 只有第一下有效：Lv.30 → Lv.50，不會繼續輪轉回 Lv.30
+  await expect(chip(page, 50)).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('讀取存檔：失敗後可重選同一個檔案；超長名稱以字元截斷不切壞 emoji', async ({ page, request }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  const input = page.locator('#bk-import');
+  const bad = { name: 'old.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ events: [], leaves: [] })) };
+  await input.setInputFiles(bad);
+  await expect(page.locator('#toast')).toContainText('舊版存檔');
+  expect(await input.inputValue()).toBe('');
+
+  const longName = 'a' + '😴'.repeat(25); // 上限 20 個 UTF-16 單位：a(1) + 9 個 emoji(各 2) = 19，再加一個就超過
+  const save = { bosses: [{ id: 'b99', level: 99, name: longName, note: '' }], events: [], leaves: [], settings: {} };
+  await input.setInputFiles({ name: 'save.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(save)) });
+  await expect(page.locator('#toast')).toContainText('讀取完成');
+  const res = await request.get(`${DOCS}/boards/main/bosses/b99`, { headers: OWNER });
+  const name = (await res.json()).fields.name.stringValue;
+  expect(name).toBe('a' + '😴'.repeat(9));
+  expect(name.isWellFormed()).toBe(true);
 });
