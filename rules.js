@@ -36,6 +36,7 @@ export const STATUSES = {
   away:   { label: '離開王座', emoji: '🚪', working: true,  color: '#3b5dc9' },
   back:   { label: '回到王座', emoji: '🪑', working: true,  color: '#38b764' },
   nap:    { label: '睡眠補血', emoji: '😴', working: true,  color: '#257179' },
+  slack:  { label: '發呆摸魚', emoji: '🐟', working: true,  color: '#41a6f6' }, // 人在位子上，算上線時數
   off:    { label: '下線',     emoji: '🌙', working: false, color: '#566c86' },
 };
 
@@ -235,6 +236,7 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
     workMinutes: 0, lunchMinutes: 0,
     awayCount: 0, awayMinutes: 0,
     napCount: 0, napMinutes: 0,
+    slackCount: 0, slackMinutes: 0,
     lateMinutes: 0, earlyMinutes: 0, overtimeMinutes: 0,
     expectedLeave: null, lateAt: null,
     remote: false,
@@ -263,6 +265,7 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
     if (seg.status === 'lunch') result.lunchMinutes += seg.end - seg.start;
     if (seg.status === 'away') { result.awayCount++; result.awayMinutes += seg.end - seg.start; }
     if (seg.status === 'nap') { result.napCount++; result.napMinutes += seg.end - seg.start; }
+    if (seg.status === 'slack') { result.slackCount++; result.slackMinutes += seg.end - seg.start; }
   }
 
   // 狀態判定
@@ -330,6 +333,7 @@ export function summarize(days) {
     overtimeCount: 0, overtimeMinutes: 0,
     awayCount: 0, awayMinutes: 0,
     napCount: 0, napMinutes: 0,
+    slackCount: 0, slackMinutes: 0,
     workMinutes: 0, requiredMinutes: 0,
     avgArrival: null, avgDeparture: null,
     earliestArrival: null, latestArrival: null, // { date, minutes }
@@ -361,6 +365,8 @@ export function summarize(days) {
     s.awayMinutes += d.awayMinutes;
     s.napCount += d.napCount;
     s.napMinutes += d.napMinutes;
+    s.slackCount += d.slackCount;
+    s.slackMinutes += d.slackMinutes;
     if (d.arrival != null && !d.remote) { // 在家修煉不列入上線時刻統計
       arrivals.push(d.arrival);
       if (!s.earliestArrival || d.arrival < s.earliestArrival.minutes) s.earliestArrival = { date: d.date, minutes: d.arrival };
@@ -414,6 +420,7 @@ export const DEFAULT_TEMPLATES = {
   away: '🚪 {魔王} 離開王座（{時間}）\n{旁白}',
   back: '🪑 {魔王} 回到王座（{時間}）\n{旁白}',
   nap: '😴 {魔王} 睡眠補血中…（{時間}）\n{旁白}',
+  slack: '🐟 {魔王} 發呆摸魚中…（{時間}）\n{旁白}',
   off: '🌙 {魔王} 下線了（{時間}）\n今日上線：{今日上線}\n{失誤}\n{旁白}',
   leave: '🏝️ {魔王} {日期}閉關（{假別}・{時段}）\n{旁白}',
 };

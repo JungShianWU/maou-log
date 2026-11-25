@@ -65,9 +65,14 @@ const isId = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v);
 const logged = (x) => (Number.isFinite(x.loggedAt) ? { loggedAt: x.loggedAt } : {});
 // 存檔裡的修改歷史：只留格式正確的
 const HIST_ACTIONS = ['edit', 'hide'];
-const keepHistory = (x) => {
+// 每種資料的歷史快照必須有的欄位
+const HIST_FIELDS = {
+  events: (e) => Number.isFinite(e.at) && typeof e.status === 'string' && typeof e.note === 'string',
+  leaves: (e) => isDate(e.date) && typeof e.kind === 'string' && typeof e.type === 'string' && typeof e.note === 'string',
+};
+const keepHistory = (x, name) => {
   const h = (Array.isArray(x.history) ? x.history : [])
-    .filter((e) => e && HIST_ACTIONS.includes(e.action) && typeof e.by === 'string' && Number.isFinite(e.t))
+    .filter((e) => e && HIST_ACTIONS.includes(e.action) && typeof e.by === 'string' && Number.isFinite(e.t) && HIST_FIELDS[name](e))
     .slice(-50);
   return h.length ? { history: h } : {};
 };
@@ -88,12 +93,12 @@ function sanitize(d, fallbackBoss = null) {
   const owner = (x) => (x.boss === undefined ? fallbackBoss : x.boss);
   const events = (Array.isArray(d.events) ? d.events : [])
     .filter((e) => e && ids.has(owner(e)) && Object.hasOwn(STATUSES, e.status) && Number.isFinite(e.at))
-    .map((e) => ({ boss: owner(e), at: e.at, status: e.status, note: str(e.note), ...logged(e), ...keepReporter(e), ...keepHistory(e) }));
+    .map((e) => ({ boss: owner(e), at: e.at, status: e.status, note: str(e.note), ...logged(e), ...keepReporter(e), ...keepHistory(e, 'events') }));
   const leaves = (Array.isArray(d.leaves) ? d.leaves : [])
     .filter((l) => l && ids.has(owner(l)) && isDate(l.date) && Object.hasOwn(LEAVE_KINDS, l.kind)
       && (l.kind !== 'custom' || (isHHMM(l.start) && isHHMM(l.end) && l.start < l.end)))
     .map((l) => ({
-      boss: owner(l), date: l.date, kind: l.kind, type: str(l.type, 30) || '❓ 其他', note: str(l.note), ...logged(l), ...keepReporter(l), ...keepHistory(l),
+      boss: owner(l), date: l.date, kind: l.kind, type: str(l.type, 30) || '❓ 其他', note: str(l.note), ...logged(l), ...keepReporter(l), ...keepHistory(l, 'leaves'),
       ...(l.kind === 'custom' ? { start: l.start, end: l.end } : {}),
     }));
   const src = d.settings || {};
@@ -150,11 +155,14 @@ function subscribe() {
       }, (err) => fail(err, 'read')),
       onSnapshot(userDoc(), (snap) => {
         const s = snap.data() || {};
+        const opened = !cache.settings.signupOpen && s.signupOpen === true;
         cache.settings = {
           templates: { ...DEFAULT_TEMPLATES, ...(s.templates || {}) },
           overrides: { ...(s.overrides || {}) },
           signupOpen: s.signupOpen === true, // 預設關閉
         };
+        // 剛開放註冊（或快取的舊設定被伺服器更新）：已登入但還沒登記的帳號補登記
+        if (opened && auth.currentUser) registerAdventurer(auth.currentUser).catch((err) => fail(err));
         c(); notify();
       }, (err) => { c(); fail(err, 'read'); }),
     ];
@@ -192,9 +200,11 @@ const HISTORY_MAX = 50; // 一般修改的上限（與 firestore.rules 一致）
 // 修改前的內容（只取會被修改的欄位）
 function snapshotOf(name, x) {
   if (name === 'events') return { at: x.at, status: x.status, note: x.note || '' };
+  if (name === 'bosses') return { level: x.level, name: x.name, note: x.note || '' };
   return {
     date: x.date, kind: x.kind, type: x.type, note: x.note || '',
-    ...(x.kind === 'custom' ? { start: x.start, end: x.end } : {}),
+    ...(x.start !== undefined ? { start: x.start } : {}),
+    ...(x.end !== undefined ? { end: x.end } : {}),
   };
 }
 function appendHistory(name, x, action) {
@@ -204,27 +214,62 @@ function appendHistory(name, x, action) {
 // 隱藏一筆日誌或閉關：用交易讀最新內容再附加「隱藏」歷史
 async function hideOne(name, id) {
   requireOnline();
+  await waitPending(id); // 剛新增的紀錄先等它寫到雲端（例如記錄後馬上按「復原」）
   await runTransaction(db, async (tx) => {
     const ref = doc(col(name), id);
     const snap = await tx.get(ref);
-    if (!snap.exists() || snap.data().deleted) return;
+    if (!snap.exists()) throw new Error('這筆紀錄還沒同步到雲端，請稍後再試');
+    if (snap.data().deleted) return;
     const cur = snap.data();
-    tx.set(ref, { ...hideMark(), ...keepReporter(cur), history: appendHistory(name, cur, 'hide') }, { merge: true });
+    tx.set(ref, {
+      ...hideMark(),
+      ...(name === 'bosses' ? {} : keepReporter(cur)),
+      history: appendHistory(name, cur, 'hide'),
+    }, { merge: true });
   });
+}
+
+// 新增時送出、還沒到雲端的寫入（id → promise），之後修改或隱藏同一筆要先等它
+const pending = new Map();
+// 最多等 10 秒；斷網卡住時明確告訴使用者，不要一直沒反應
+const failed = new Map(); // 新增被拒絕的紀錄（id → 錯誤），之後修改或隱藏時直接說明，不叫人重試
+async function waitPending(id) {
+  const p = pending.get(id);
+  if (p) {
+    let timer;
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('這筆紀錄尚未同步到雲端，請確認網路後再試')), 10_000); });
+    try { await Promise.race([p.catch(() => {}), timeout]); } finally { clearTimeout(timer); }
+  }
+  if (failed.has(id)) throw new Error(`這筆紀錄沒有存到雲端（${failed.get(id).code || failed.get(id).message}），請重新記錄`);
+}
+function track(id, promise) {
+  pending.set(id, promise);
+  promise.catch((err) => failed.set(id, err)).finally(() => pending.delete(id));
+  write(promise);
 }
 
 // 「刪除」＝標記為隱藏（資料保留）
 async function hideDocs(list) {
   await commitInChunks(list.map((d) => (b) => b.set(d.ref, {
     ...hideMark(),
-    ...(d.name === 'bosses' ? {} : { ...keepReporter(d.data), history: appendHistory(d.name, d.data, 'hide') }),
+    ...(d.name === 'bosses' ? {} : keepReporter(d.data)),
+    history: appendHistory(d.name, d.data, 'hide'),
   }, { merge: true })));
 }
 
 // settings：'replace' 取代、'skip' 不動（上傳舊存檔時不覆蓋目前的範本與休戰日）
-async function writeData(clean, { settings }) {
+const sameBoss = (cur, b) => cur.level === b.level && cur.name === b.name && (cur.note || '') === b.note;
+
+// existingBosses：雲端已存在的魔王（id → 資料，含已隱藏的）；同 id 的改成附加修改歷史後更新，並恢復顯示
+async function writeData(clean, { settings, existingBosses = new Map() }) {
   const ops = [];
-  clean.bosses.forEach(({ id, ...b }) => ops.push((x) => x.set(doc(col('bosses'), id), { ...b, by: me() })));
+  clean.bosses.forEach(({ id, ...b }) => {
+    const cur = existingBosses.get(id);
+    const ref = doc(col('bosses'), id);
+    if (cur && sameBoss(cur, b) && !cur.deleted) return; // 內容沒變：不寫、不消耗修改次數
+    if (cur) ops.push((x) => x.set(ref, { ...b, deleted: false, by: me(), history: appendHistory('bosses', cur, 'edit') }, { merge: true }));
+    else ops.push((x) => x.set(ref, { ...b, by: me() }));
+  });
   // 保留存檔裡原本的情報提供者；沒有的才算是讀取存檔的人
   clean.events.forEach((e) => ops.push((b) => b.set(doc(col('events')), { reporter: me(), ...e, by: me() })));
   clean.leaves.forEach((l) => ops.push((b) => b.set(doc(col('leaves')), { reporter: me(), ...l, by: me() })));
@@ -236,6 +281,7 @@ async function writeData(clean, { settings }) {
 
 // 登入後把自己登記到冒險者清單（只存去識別化的 email；第一次登入時間保留）
 async function registerAdventurer(user) {
+  await ready; // 等註冊開關等設定載入（開站時登入狀態可能比設定先回來）
   const ref = doc(db, 'adventurers', user.uid);
   const masked = maskEmail(user.email);
   const snap = await getDoc(ref);
@@ -246,6 +292,9 @@ async function registerAdventurer(user) {
 }
 
 export const isEditorUid = (uid) => EDITOR_UIDS.includes(uid);
+
+// 開站就開始同步看板（公開可讀），第一批資料到齊時完成
+const ready = subscribe();
 
 export const account = {
   // 登入狀態改變時呼叫 cb(user, canEdit)
@@ -268,7 +317,7 @@ export const account = {
 
 export const store = {
   // 開站就開始同步看板（公開可讀），第一批資料到齊時完成
-  ready: subscribe(),
+  ready,
   async getAll() { return cache; },
   onChange(fn) { changeListeners.add(fn); },
   onError(fn) { errorListeners.add(fn); },
@@ -277,11 +326,12 @@ export const store = {
     const ref = doc(col('events'));
     const ev = { boss, at, status, note, loggedAt: Date.now(), reporter: me(), by: me() };
     cache.events.push({ id: ref.id, ...ev });
-    write(setDoc(ref, ev));
+    track(ref.id, setDoc(ref, ev));
     return { id: ref.id, ...ev };
   },
   async updateEvent(id, patch) {
     requireOnline();
+    await waitPending(id);
     await runTransaction(db, async (tx) => {
       const ref = doc(col('events'), id);
       const snap = await tx.get(ref);
@@ -305,8 +355,26 @@ export const store = {
     const lv = { boss: leave.boss, date: leave.date, kind: leave.kind, type: leave.type, note: leave.note || '', loggedAt: Date.now(), reporter: me(), by: me() };
     if (leave.kind === 'custom') Object.assign(lv, { start: leave.start, end: leave.end });
     cache.leaves.push({ id: ref.id, ...lv });
-    write(setDoc(ref, lv));
+    track(ref.id, setDoc(ref, lv));
     return { id: ref.id, ...lv };
+  },
+  // 修改閉關：和日誌一樣用交易附加修改歷史；不能換魔王、記錄時間與情報提供者不變
+  async updateLeave(id, patch) {
+    requireOnline();
+    await waitPending(id);
+    await runTransaction(db, async (tx) => {
+      const ref = doc(col('leaves'), id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('找不到這筆閉關');
+      const cur = snap.data();
+      if ((cur.history || []).length >= HISTORY_MAX) throw new Error(`這筆閉關已修改 ${HISTORY_MAX} 次，不能再修改`);
+      const next = { ...cur, ...patch };
+      tx.set(ref, {
+        boss: cur.boss, date: next.date, kind: next.kind, type: next.type, note: next.note || '',
+        ...(next.kind === 'custom' ? { start: next.start, end: next.end } : {}),
+        ...logged(cur), ...keepReporter(cur), by: me(), history: appendHistory('leaves', cur, 'edit'),
+      });
+    });
   },
   async deleteLeave(id) {
     await hideOne('leaves', id);
@@ -317,22 +385,25 @@ export const store = {
     const ref = doc(col('bosses'));
     const b = { level, name, note, by: me() };
     cache.bosses.push({ id: ref.id, ...b });
-    write(setDoc(ref, b));
+    track(ref.id, setDoc(ref, b));
     return { id: ref.id, ...b };
   },
+  // 修改魔王：用交易附加修改歷史（誰把等級、名稱、備註從什麼改成什麼）
   async updateBoss(id, { level, name, note }) {
-    const b = cache.bosses.find((x) => x.id === id);
-    if (!b) return;
-    Object.assign(b, { level, name, note, by: me() });
-    write(setDoc(doc(col('bosses'), id), { level, name, note, by: b.by }, { merge: true }));
+    requireOnline();
+    await waitPending(id);
+    await runTransaction(db, async (tx) => {
+      const ref = doc(col('bosses'), id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('找不到這隻魔王');
+      const cur = snap.data();
+      if ((cur.history || []).length >= HISTORY_MAX) throw new Error(`這隻魔王已修改 ${HISTORY_MAX} 次，不能再修改`);
+      tx.set(ref, { level, name, note, by: me(), history: appendHistory('bosses', cur, 'edit') }, { merge: true });
+    });
   },
   // 刪除魔王＝把魔王標記為隱藏（牠的日誌與閉關跟著不顯示，資料都保留）
-  // 等雲端確認後才改快取，失敗時畫面不會誤顯示已刪除
   async deleteBoss(id) {
-    requireOnline();
-    await commitInChunks([(b) => b.set(doc(col('bosses'), id), hideMark(), { merge: true })]);
-    const b = cache.bosses.find((x) => x.id === id);
-    if (b) Object.assign(b, hideMark());
+    await hideOne('bosses', id);
   },
 
   async setTemplate(key, text) {
@@ -372,7 +443,13 @@ export const store = {
     if (!clean.bosses.length) throw new Error('存檔裡沒有魔王，已取消');
     requireOnline();
     const old = await listAllDocs();
-    await writeData(clean, { settings: 'replace' });
+    const existingBosses = new Map((await getDocs(col('bosses'))).docs.map((d) => [d.id, d.data()]));
+    const full = clean.bosses.find((b) => {
+      const cur = existingBosses.get(b.id);
+      return cur && !(sameBoss(cur, b) && !cur.deleted) && (cur.history || []).length >= HISTORY_MAX;
+    });
+    if (full) throw new Error(`魔王「${full.name}」已修改 ${HISTORY_MAX} 次，無法用存檔更新；請先改用新的魔王`);
+    await writeData(clean, { settings: 'replace', existingBosses });
     const kept = new Set(clean.bosses.map((b) => b.id)); // 同 id 的魔王已被覆寫，不能隱藏
     await hideDocs(old.filter((o) => !(o.name === 'bosses' && kept.has(o.id))));
     return { skipped: clean.skipped };

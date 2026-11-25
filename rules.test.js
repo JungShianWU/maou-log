@@ -126,6 +126,16 @@ test('在家修煉：整天視為照班表上班，不計失誤', () => {
   assert.equal(s.workMinutes, 480 + 490); // 在家修煉 480 + 08:50–18:00 扣午休 490
 });
 
+test('發呆摸魚：算上線時數，另計次數與時間', () => {
+  const r = day([['09:00', 'work'], ['10:00', 'slack'], ['10:40', 'work'], ['18:00', 'off']]);
+  assert.equal(r.workMinutes, 480);
+  assert.equal(r.slackCount, 1);
+  assert.equal(r.slackMinutes, 40);
+  const s = summarize([r]);
+  assert.equal(s.slackCount, 1);
+  assert.equal(s.slackMinutes, 40);
+});
+
 test('過去日沒有下班紀錄 → missingOff', () => {
   assert.equal(day([['09:00', 'work']]).state, 'missingOff');
 });

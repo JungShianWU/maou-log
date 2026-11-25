@@ -732,3 +732,99 @@ test('讀取存檔不會關掉註冊開關', async ({ page, request }) => {
   await expect(page.locator('#toast')).toContainText('讀取完成');
   await expect(page.locator('#view-settings')).toContainText('開放中');
 });
+
+test('發呆摸魚：可以記錄，成就頁另計', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('[data-status="slack"]').click();
+  await expect(page.locator('#msg')).toHaveValue(/🐟 Lv\.30 魔王 發呆摸魚中…/);
+  await page.locator('#done').click();
+  await expect(page.locator('.now .label')).toContainText('發呆摸魚');
+  await tab(page, 'stats');
+  await expect(page.locator('#view-stats .tile', { hasText: '發呆摸魚' })).toBeVisible();
+});
+
+test('閉關顯示在冒險者觀察日誌，可以修改並留下修改歷史；GM 可從編輯視窗刪除', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('#add-leave').click();
+  await page.locator('#l-date').fill('2026-11-24');
+  await page.locator('#l-kind').selectOption('am');
+  await page.locator('#l-save').click();
+  await page.locator('#done').click();
+  const row = page.locator('#view-record .list li', { hasText: '閉關' }).first();
+  await expect(row).toContainText('上半場');
+
+  await row.locator('[data-edit-leave]').click();
+  await page.locator('#l-kind').selectOption('pm');
+  await page.locator('#l-save').click();
+  await expect(row).toContainText('下半場');
+  await row.locator('[data-hist]').click();
+  await expect(row.locator('.hist')).toContainText('修正：原本是 11/24（二） 🎫 特休券・上半場');
+
+  await row.locator('[data-edit-leave]').click();
+  await page.locator('#l-del').click();
+  await expect(page.locator('#toast')).toContainText('資料仍保留');
+  await expect(page.locator('#view-record .list li', { hasText: '閉關' })).toHaveCount(0);
+});
+
+test('魔王的修改也有歷史，所有人都能展開', async ({ page, browser }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('#edit-boss').click();
+  await page.locator('#b-level').fill('31');
+  await page.locator('#b-save').click();
+  await expect(page.locator('.now .label')).toContainText('Lv.31');
+
+  const ctx = await browser.newContext();
+  const viewer = await ctx.newPage();
+  await open(viewer, 31);
+  await viewer.locator('.boss-note [data-hist]').click();
+  await expect(viewer.locator('.boss-note .hist')).toContainText('修正：原本是 Lv.30 魔王（愛喝咖啡）');
+  await ctx.close();
+});
+
+test('記錄後馬上按「按錯了，復原」會真的隱藏', async ({ page, request }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('[data-status="work"]').click();
+  await page.locator('#undo').click();
+  await expect(page.locator('#toast')).toHaveText('已復原');
+  await expect(page.locator('#view-record .list')).toHaveCount(0);
+  await expect.poll(async () => {
+    const docs = (await (await request.get(`${DOCS}/boards/main/events`, { headers: OWNER })).json()).documents || [];
+    return docs.map((d) => d.fields.deleted?.booleanValue);
+  }).toEqual([true]);
+});
+
+test('讀取存檔：存檔裡的魔王和雲端現有的同一隻，會附加修改歷史後更新', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  const save = { bosses: [{ id: 'b30', level: 35, name: '魔王', note: '從存檔來' }], events: [], leaves: [], settings: {} };
+  await page.locator('#bk-import').setInputFiles({ name: 'save.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(save)) });
+  await expect(page.locator('#toast')).toContainText('讀取完成');
+  await expect(chip(page, 35)).toBeVisible();
+  await chip(page, 35).click();
+  await tab(page, 'record');
+  await expect(page.locator('.boss-note')).toContainText('從存檔來');
+  await page.locator('.boss-note [data-hist]').click();
+  await expect(page.locator('.boss-note .hist')).toContainText('原本是 Lv.30 魔王（愛喝咖啡）');
+});
+
+test('讀取存檔：魔王內容沒變就不附加修改歷史（重複匯入不會耗光修改次數）', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  const save = { bosses: [{ id: 'b30', level: 30, name: '魔王', note: '愛喝咖啡' }], events: [], leaves: [], settings: {} };
+  for (let i = 0; i < 2; i++) {
+    await page.locator('#bk-import').setInputFiles({ name: 'save.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(save)) });
+    await expect(page.locator('#toast')).toContainText('讀取完成');
+  }
+  await tab(page, 'record');
+  await expect(page.locator('.boss-note [data-hist]')).toHaveCount(0);
+});

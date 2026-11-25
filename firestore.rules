@@ -80,6 +80,12 @@ service cloud.firestore {
         && e.at == resource.data.at && e.status == resource.data.status
         && e.note == resource.data.get('note', '');
     }
+    function bossHistoryTruthful() {
+      let e = request.resource.data.history[resource.data.get('history', []).size()];
+      return e.keys().hasOnly(['level', 'name', 'note', 'action', 'by', 't'])
+        && e.level == resource.data.level && e.name == resource.data.name
+        && e.note == resource.data.get('note', '');
+    }
     function leaveHistoryTruthful() {
       let e = request.resource.data.history[resource.data.get('history', []).size()];
       return e.keys().hasOnly(['date', 'kind', 'type', 'note', 'start', 'end', 'action', 'by', 't'])
@@ -119,7 +125,7 @@ service cloud.firestore {
       match /bosses/{id} {
         function validBoss() {
           return isMember() && board == 'main' && hideAllowed(request.resource.data)
-            && request.resource.data.keys().hasOnly(['level', 'name', 'note', 'by', 'deleted', 'deletedAt'])
+            && request.resource.data.keys().hasOnly(['level', 'name', 'note', 'by', 'deleted', 'deletedAt', 'history'])
             && common(request.resource.data)
             && request.resource.data.level is int
             && request.resource.data.level >= 1 && request.resource.data.level <= 999
@@ -128,8 +134,8 @@ service cloud.firestore {
         }
         allow read: if true;
         allow delete: if false;
-        allow create: if validBoss();
-        allow update: if validBoss() && notHiddenOrEditor();
+        allow create: if validBoss() && noHistory();
+        allow update: if validBoss() && notHiddenOrEditor() && historyAppended() && bossHistoryTruthful();
       }
 
       match /events/{id} {
@@ -139,7 +145,7 @@ service cloud.firestore {
             && common(request.resource.data)
             && isBossRef(request.resource.data.boss)
             && request.resource.data.at is number
-            && request.resource.data.status in ['work', 'remote', 'makeup', 'lunch', 'away', 'back', 'nap', 'off']
+            && request.resource.data.status in ['work', 'remote', 'makeup', 'lunch', 'away', 'back', 'nap', 'slack', 'off']
             && isText(request.resource.data.note, 100);
         }
         allow read: if true;

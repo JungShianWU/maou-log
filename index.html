@@ -528,7 +528,9 @@ function historyHTML(x, kind) {
   const fmtT = (t) => `${fmtDate(R.dateKey(t))} ${R.fmtMin(R.minutesOf(t))}`;
   const before = (e) => (kind === 'event'
     ? `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status]?.label || e.status}${e.note ? `（${e.note}）` : ''}`
-    : `${fmtDate(e.date)} ${e.type}・${R.leaveSpanText(e)}${e.note ? `（${e.note}）` : ''}`);
+    : kind === 'boss'
+      ? `Lv.${e.level} ${e.name}${e.note ? `（${e.note}）` : ''}`
+      : `${fmtDate(e.date)} ${e.type}・${R.leaveSpanText(e)}${e.note ? `（${e.note}）` : ''}`);
   const rows = [...h].reverse().map((e) => `<li>${fmtT(e.t)} ${esc(userText(e.by))} ${e.action === 'hide' ? '隱藏' : '修正'}：原本是 ${esc(before(e))}</li>`).join('');
   return `<button class="hist-btn" data-hist>✎ 修正 ${h.length} 次</button><ul class="hist" hidden>${rows}</ul>`;
 }
@@ -587,6 +589,7 @@ function openBossEditor(boss) {
       <label class="f" style="flex:1"><span>名稱</span><input type="text" id="b-name" maxlength="20" value="${esc(boss?.name || '魔王')}"></label>
     </div>
     <label class="f"><span>屬性備註（觀戰者也看得到）</span><textarea id="b-note" maxlength="200" placeholder="例如：愛喝咖啡、週三固定開會">${esc(boss?.note || '')}</textarea></label>
+    ${boss ? historyHTML(boss, 'boss') : ''}
     <div class="sheet-actions">
       ${boss && ui.canEdit ? '<button class="btn danger" id="b-del">刪除</button>' : '<button class="btn" id="b-cancel">取消</button>'}
       <button class="btn primary" id="b-save">儲存</button>
@@ -597,8 +600,10 @@ function openBossEditor(boss) {
       const name = $('#b-name', el).value.trim() || '魔王';
       const note = $('#b-note', el).value.trim();
       if (!Number.isInteger(level) || level < 1 || level > 999) { toast('等級請填 1–999 的整數'); return; }
-      if (boss) await store.updateBoss(boss.id, { level, name, note });
-      else { const b = await store.addBoss({ level, name, note }); ui.bossId = b.id; }
+      try {
+        if (boss) await store.updateBoss(boss.id, { level, name, note });
+        else { const b = await store.addBoss({ level, name, note }); ui.bossId = b.id; }
+      } catch (err) { toast(err.message); return; }
       closeSheet();
       toast('已儲存');
       selectBoss(ui.bossId);
@@ -829,7 +834,9 @@ function openNotify({ title, text, undo, prompt = '要廣播給隊友嗎？訊�
     };
     $('#copy', el)?.addEventListener('click', async () => { if (await copy()) toast('已複製'); });
     $('#done', el).onclick = closeSheet;
-    if (undo) $('#undo', el).onclick = async () => { await undo(); closeSheet(); toast('已復原'); render(); };
+    if (undo) $('#undo', el).onclick = async () => {
+      try { await undo(); closeSheet(); toast('已復原'); render(); } catch (err) { toast('復原失敗：' + (err.code || err.message)); }
+    };
   });
 }
 
@@ -908,7 +915,7 @@ function renderRecord() {
       <div class="bar-label"><span>EXP</span><span class="num">${Math.round(exp)}%</span></div>
       <div class="hp"><div style="width:${exp}%"></div></div>
       ${day.lateMinutes ? `<div class="small" style="color:var(--danger);margin-top:8px">晚上線 ${R.fmtDuration(day.lateMinutes)}</div>` : ''}` : ''}
-      ${boss.note || canWrite() ? `<div class="boss-note"><span class="t">📜 ${boss.note ? esc(boss.note) : '<span class="muted">還沒有屬性備註</span>'}</span>
+      ${boss.note || canWrite() || boss.history?.length ? `<div class="boss-note"><span class="t">📜 ${boss.note ? esc(boss.note) : '<span class="muted">還沒有屬性備註</span>'}${historyHTML(boss, 'boss')}</span>
         ${canWrite() ? '<button class="btn sm" id="edit-boss">✏️ 編輯</button>' : ''}</div>` : ''}
       <button class="btn line block" id="share-now" style="margin-top:14px">📣 分享目前狀態到 LINE</button>
     </div>
@@ -941,7 +948,7 @@ function renderRecord() {
     </div>` : ''}
 
     ${ui.showHidden && ui.isEditor ? '<div class="banner"><span class="small">👁 正在顯示已隱藏的紀錄（只有 GM 看得到）</span><span class="spacer"></span><button class="btn sm" id="hide-hidden">關閉</button></div>' : ''}
-    ${day.events.length || hiddenEvents(today).length ? `<div class="card"><h2>冒險者觀察日誌</h2>${eventList(day)}</div>` : ''}
+    ${day.events.length || day.leaves.length || hiddenEvents(today).length || hiddenLeaves(today).length ? `<div class="card"><h2>冒險者觀察日誌</h2>${eventList(day)}</div>` : ''}
   `;
 
   bindEventList($('#view-record'));
@@ -965,17 +972,25 @@ function renderRecord() {
 
 function eventList(day) {
   const list = [...day.events, ...hiddenEvents(day.date)].sort((a, b) => a.at - b.at);
-  return `<ul class="list">${list.map((e) => {
+  // 閉關排在最前面（沒有發生時刻）
+  const leaves = [...day.leaves, ...hiddenLeaves(day.date)].map((l) => `<li class="${l.deleted ? 'gone' : ''}"><span class="time">閉關</span><span class="dot" style="background:${R.DAY_STATES.leave.color}"></span>
+      <span>🏝️ ${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.note ? `<span class="muted small">・${esc(l.note)}</span>` : ''}${reporterHTML(l)}${loggedHTML(l, R.taipeiMs(l.date, '09:00'))}${l.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(l, 'leave')}</span>
+      ${canWrite() && !l.deleted ? `<span class="spacer"></span><button class="btn sm" data-edit-leave="${esc(l.id)}">修改</button>` : ''}</li>`).join('');
+  return `<ul class="list">${leaves}${list.map((e) => {
     const s = R.STATUSES[e.status];
     return `<li class="${e.deleted ? 'gone' : ''}"><span class="time">${R.fmtMin(R.minutesOf(e.at))}</span><span class="dot" style="background:${s.color}"></span>
       <span>${s.emoji} ${s.label}${e.note ? `<span class="muted small">・${esc(e.note)}</span>` : ''}${reporterHTML(e)}${loggedHTML(e, e.at)}${e.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(e, 'event')}</span>
       ${canWrite() && !e.deleted ? `<span class="spacer"></span><button class="btn sm" data-edit="${esc(e.id)}">修改</button>` : ''}</li>`;
   }).join('')}</ul>`;
 }
-function bindEventList(root) {
+function bindEventList(root, back) {
   $$('[data-edit]', root).forEach((b) => b.onclick = () => {
     const ev = DB.events.find((e) => e.id === b.dataset.edit);
-    openEventEditor({ date: R.dateKey(ev.at), ev });
+    openEventEditor({ date: R.dateKey(ev.at), ev, back });
+  });
+  $$('[data-edit-leave]', root).forEach((b) => b.onclick = () => {
+    const lv = DB.leaves.find((l) => l.id === b.dataset.editLeave);
+    openLeaveEditor(lv.date, back, lv);
   });
 }
 
@@ -1007,41 +1022,57 @@ function openEventEditor({ date, ev, preset = {}, back }) {
       toast('已儲存');
       after();
     };
-    $('#e-del', el)?.addEventListener('click', async () => { await store.deleteEvent(ev.id); toast('已刪除（資料仍保留）'); after(); });
+    $('#e-del', el)?.addEventListener('click', async () => {
+      try { await store.deleteEvent(ev.id); toast('已刪除（資料仍保留）'); after(); } catch (err) { toast('刪除失敗：' + (err.code || err.message)); }
+    });
     $('#e-cancel', el)?.addEventListener('click', () => (back ? back() : closeSheet()));
   });
 }
 
 // ---------- 休假編輯 ----------
-function openLeaveEditor(date, back) {
+// leave 有值＝修改既有的閉關
+function openLeaveEditor(date, back, leave = null) {
+  const types = leave && !R.LEAVE_TYPES.includes(leave.type) ? [leave.type, ...R.LEAVE_TYPES] : R.LEAVE_TYPES;
+  const custom = leave?.kind === 'custom';
   openSheet(`
-    <h3>🏝️ 閉關登記（休假）</h3>
-    <label class="f"><span>日期（可以先登記未來的假）</span><input type="date" id="l-date" value="${date}"></label>
+    <h3>🏝️ ${leave ? '修改閉關' : '閉關登記（休假）'}</h3>
+    <label class="f"><span>日期（可以先登記未來的假）</span><input type="date" id="l-date" value="${esc(leave?.date || date)}"></label>
     <label class="f"><span>時長</span><select id="l-kind">
-      ${Object.entries(R.LEAVE_KINDS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
+      ${Object.entries(R.LEAVE_KINDS).map(([k, v]) => `<option value="${k}" ${leave?.kind === k ? 'selected' : ''}>${v.label}</option>`).join('')}
     </select></label>
-    <div class="row hidden" id="l-custom" style="margin-bottom:10px">
-      <label class="f" style="flex:1;margin:0"><span>從</span><input type="time" id="l-start" value="14:00"></label>
-      <label class="f" style="flex:1;margin:0"><span>到</span><input type="time" id="l-end" value="16:00"></label>
+    <div class="row ${custom ? '' : 'hidden'}" id="l-custom" style="margin-bottom:10px">
+      <label class="f" style="flex:1;margin:0"><span>從</span><input type="time" id="l-start" value="${esc(custom ? leave.start : '14:00')}"></label>
+      <label class="f" style="flex:1;margin:0"><span>到</span><input type="time" id="l-end" value="${esc(custom ? leave.end : '16:00')}"></label>
     </div>
-    <label class="f"><span>假別</span><select id="l-type">${R.LEAVE_TYPES.map((t) => `<option>${t}</option>`).join('')}</select></label>
-    <label class="f"><span>旁白</span><input type="text" id="l-note" placeholder="例如：出國旅行" maxlength="100"></label>
+    <label class="f"><span>假別</span><select id="l-type">${types.map((t) => `<option ${leave?.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+    <label class="f"><span>旁白</span><input type="text" id="l-note" placeholder="例如：出國旅行" maxlength="100" value="${esc(leave?.note || '')}"></label>
     <div class="muted small">上半場：13:00 前上線、18:00 可下線。下半場：上線 + 3 小時可下線。</div>
+    ${leave ? historyHTML(leave, 'leave') : ''}
     <div class="sheet-actions">
-      <button class="btn" id="l-cancel">取消</button>
+      ${leave && ui.canEdit ? '<button class="btn danger" id="l-del">刪除</button>' : '<button class="btn" id="l-cancel">取消</button>'}
       <button class="btn primary" id="l-save">儲存</button>
     </div>
   `, (el) => {
+    const after = () => { render(); back ? back() : closeSheet(); };
+    $('#l-del', el)?.addEventListener('click', async () => {
+      try { await store.deleteLeave(leave.id); toast('已刪除（資料仍保留）'); after(); } catch (err) { toast('刪除失敗：' + (err.code || err.message)); }
+    });
     $('#l-kind', el).onchange = (e) => $('#l-custom', el).classList.toggle('hidden', e.target.value !== 'custom');
-    $('#l-cancel', el).onclick = () => (back ? back() : closeSheet());
+    $('#l-cancel', el)?.addEventListener('click', () => (back ? back() : closeSheet()));
     $('#l-save', el).onclick = async () => {
-      const lv = { boss: ui.bossId, date: $('#l-date', el).value, kind: $('#l-kind', el).value, type: $('#l-type', el).value, note: $('#l-note', el).value.trim() };
+      const lv = { boss: leave ? leave.boss : ui.bossId, date: $('#l-date', el).value, kind: $('#l-kind', el).value, type: $('#l-type', el).value, note: $('#l-note', el).value.trim() };
       if (!lv.date) { toast('請選日期'); return; }
       if (lv.kind === 'custom') {
         lv.start = $('#l-start', el).value; lv.end = $('#l-end', el).value;
         if (!lv.start || !lv.end || lv.start >= lv.end) { toast('結束時間要晚於開始時間'); return; }
       }
-      if (bossLeaves().some((x) => R.leavesOverlap(x, lv))) { toast('這段時間已經有閉關了'); return; }
+      if (bossLeaves(lv.boss).some((x) => x.id !== leave?.id && R.leavesOverlap(x, lv))) { toast('這段時間已經有閉關了'); return; }
+      if (leave) {
+        try { await store.updateLeave(leave.id, lv); } catch (err) { toast(err.message); return; }
+        toast('已儲存');
+        after();
+        return;
+      }
       const saved = await store.addLeave(lv);
       render();
       openNotify({
@@ -1161,15 +1192,11 @@ function openDay(date) {
       <div style="margin-top:10px">${timelineHTML(d)}</div>` : ''}
 
     <div class="card" style="margin-top:12px">
-      <div class="row"><h2 style="margin:0">冒險者觀察日誌</h2><span class="spacer"></span>${canWrite() && !d.remote ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}</div>
-      ${d.events.length || hiddenEvents(d.date).length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
+      <div class="row"><h2 style="margin:0">冒險者觀察日誌</h2><span class="spacer"></span>
+        ${canWrite() && !d.remote ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}${canWrite() ? '<button class="btn sm" id="d-leave" style="margin-left:6px">＋ 閉關</button>' : ''}</div>
+      ${d.events.length || d.leaves.length || hiddenEvents(d.date).length || hiddenLeaves(d.date).length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
     </div>
 
-    <div class="card">
-      <div class="row"><h2 style="margin:0">閉關</h2><span class="spacer"></span>${canWrite() ? '<button class="btn sm" id="d-leave">＋ 登記</button>' : ''}</div>
-      ${d.leaves.length || hiddenLeaves(d.date).length ? `<ul class="list">${[...d.leaves, ...hiddenLeaves(d.date)].map((l) => `<li class="${l.deleted ? 'gone' : ''}"><span>${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.note ? `<span class="muted small">・${esc(l.note)}</span>` : ''}${reporterHTML(l)}${loggedHTML(l, R.taipeiMs(l.date, '09:00'))}${l.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(l, 'leave')}</span>
-        ${ui.canEdit && canWrite() && !l.deleted ? `<span class="spacer"></span><button class="btn sm danger" data-del-leave="${esc(l.id)}">刪除</button>` : ''}</li>`).join('')}</ul>` : '<div class="muted small" style="margin-top:8px">沒有閉關</div>'}
-    </div>
 
     <div class="row wrap-row small">
       <span class="muted">這天是${info.workday ? '冒險日' : '休戰日'}${ov ? '（手動設定）' : ''}</span><span class="spacer"></span>
@@ -1182,8 +1209,7 @@ function openDay(date) {
     if (!canWrite()) return;
     $('#d-add', el)?.addEventListener('click', () => openEventEditor({ date, back, preset: d.events.length ? { status: 'off', time: R.fmtMin(R.SCHEDULE.end) } : { status: 'work', time: '09:00' } }));
     $('#d-leave', el).onclick = () => openLeaveEditor(date, back);
-    $$('[data-edit]', el).forEach((b) => b.onclick = () => openEventEditor({ date, ev: DB.events.find((e) => e.id === b.dataset.edit), back }));
-    $$('[data-del-leave]', el).forEach((b) => b.onclick = async () => { await store.deleteLeave(b.dataset.delLeave); render(); back(); });
+    bindEventList(el, back);
     $('#d-ov', el)?.addEventListener('click', async () => { await store.setOverride(date, info.workday ? 'holiday' : 'workday'); render(); back(); });
     $('#d-ov-clear', el)?.addEventListener('click', async () => { await store.setOverride(date, null); render(); back(); });
   });
@@ -1226,6 +1252,7 @@ function renderStats() {
       ${tile('上線時數', hrs(s.workMinutes), `目標 ${Math.round(s.requiredMinutes / 6) / 10} 小時（${s.completeDays} 個通關日）${s.requiredMinutes ? `・達成 ${Math.round((s.workMinutes / s.requiredMinutes) * 100)}%` : ''}`, true)}
       ${tile('離開王座', `${s.awayCount}<small>次</small>`, s.awayCount ? `共 ${R.fmtDuration(s.awayMinutes)}` : '')}
       ${tile('睡眠補血', `${s.napCount}<small>次</small>`, s.napCount ? `共 ${R.fmtDuration(s.napMinutes)}` : '')}
+      ${tile('發呆摸魚', `${s.slackCount}<small>次</small>`, s.slackCount ? `共 ${R.fmtDuration(s.slackMinutes)}` : '')}
       ${s.remoteDays ? tile('在家修煉', `${s.remoteDays}<small>天</small>`, '照班表計算，不列入上線時刻') : ''}
       ${tile('加時賽', `${s.overtimeCount}<small>次</small>`, s.overtimeCount ? `共 ${R.fmtDuration(s.overtimeMinutes)}` : '')}
       ${tile('閉關', `${s.leaveDays}<small>天</small>`, esc(leaveText))}
@@ -1283,7 +1310,7 @@ function download(name, text, type) {
 }
 
 function downloadCSV(days) {
-  const head = ['日期', '星期', '日別', '狀態', '上線', '下線', '可下線', '遲到(分)', '早退(分)', '加時(分)', '上線時數(分)', '吃飯(分)', '離開王座(次)', '離開王座(分)', '睡眠補血(分)', '閉關', '紀錄明細'];
+  const head = ['日期', '星期', '日別', '狀態', '上線', '下線', '可下線', '遲到(分)', '早退(分)', '加時(分)', '上線時數(分)', '吃飯(分)', '離開王座(次)', '離開王座(分)', '睡眠補血(分)', '發呆摸魚(分)', '閉關', '紀錄明細'];
   // 以 = + - @ 開頭的內容加上 ' 避免 Excel 當成公式執行
   const q = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; };
   const rows = days.filter((d) => d.state !== 'future').map((d) => [
@@ -1292,7 +1319,7 @@ function downloadCSV(days) {
     // 在家修煉觀察不到上下線，不輸出時間
     d.arrival != null && !d.remote ? R.fmtMin(d.arrival) : '', d.departure != null && !d.remote ? R.fmtMin(d.departure) : '',
     d.expectedLeave != null && !d.remote ? R.fmtMin(d.expectedLeave) : '',
-    d.lateMinutes, d.earlyMinutes, d.overtimeMinutes, d.workMinutes, d.lunchMinutes, d.awayCount, d.awayMinutes, d.napMinutes,
+    d.lateMinutes, d.earlyMinutes, d.overtimeMinutes, d.workMinutes, d.lunchMinutes, d.awayCount, d.awayMinutes, d.napMinutes, d.slackMinutes,
     d.leaves.map((l) => `${l.type}・${R.leaveSpanText(l, '-')}`).join('；'),
     d.events.map((e) => { const lg = loggedText(e, e.at); const rp = reporterText(e); return `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status].label}${e.note ? `(${e.note})` : ''}${lg ? `[${lg}]` : ''}${rp ? `[情報 ${rp}]` : ''}`; }).join('；'),
   ].map(q).join(','));

@@ -154,9 +154,14 @@ test('情報提供者 reporter：新增時必須是本人，之後不能換人',
 
 test('魔王：編輯者可新增修改刪除；等級、名稱、備註格式不對就擋下', async () => {
   await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b50'), boss()));
-  await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了' })));
+  // 修改魔王也要附加修改歷史（修改前的等級、名稱、備註）
+  const h1 = { level: 30, name: '魔王', note: '', action: 'edit', by: EDITOR, t: 2 };
+  await assertFails(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了' })));
+  await assertFails(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了', history: [{ ...h1, level: 99 }] })));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了', history: [h1] })));
   await assertFails(deleteDoc(doc(editor(), 'boards/main/bosses/b30')));
-  await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b30'), { deleted: true, deletedAt: 1, by: EDITOR }, { merge: true }));
+  const h2 = { level: 31, name: '魔王', note: '升級了', action: 'hide', by: EDITOR, t: 3 };
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b30'), { deleted: true, deletedAt: 1, by: EDITOR, history: [h1, h2] }, { merge: true }));
   await assertFails(setDoc(doc(editor(), 'boards/main/bosses/x'), boss({ level: 0 })));
   await assertFails(setDoc(doc(editor(), 'boards/main/bosses/x'), boss({ level: 1.5 })));
   await assertFails(setDoc(doc(editor(), 'boards/main/bosses/x'), boss({ name: '' })));
@@ -178,8 +183,9 @@ test('日誌：by 必須是寫入者本人', async () => {
   await assertFails(setDoc(doc(editor(), 'boards/main/events/x'), noBy));
 });
 
-test('日誌：在家修煉（remote）是合法狀態', async () => {
+test('日誌：在家修煉（remote）、發呆摸魚（slack）是合法狀態', async () => {
   await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/r'), event({ status: 'remote' })));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/s'), event({ status: 'slack' })));
 });
 
 test('記錄時間 loggedAt：選填，必須是數字', async () => {
