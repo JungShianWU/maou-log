@@ -1,0 +1,15 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": {
+      ".read": true,
+      "$conn": {
+        ".write": true,
+        ".validate": "$conn.length <= 32 && newData.hasChildren(['t']) && newData.child('t').isNumber() && newData.child('t').val() <= now && newData.child('t').val() > now - 60000",
+        "t": { ".validate": true },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}

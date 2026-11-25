@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1c2c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>魔王出沒紀錄</title>
+<script>try { document.documentElement.dataset.skin = localStorage.getItem('maou-log:skin') || 'boy'; } catch { document.documentElement.dataset.skin = 'boy'; }</script>
+<style>
+  @font-face {
+    font-family: 'Cubic11';
+    src: url('https://cdn.jsdelivr.net/gh/ACh-K/Cubic-11@4c566f7d6cc5c05ee360fe9cff56b5da1fcafd4d/fonts/web/Cubic_11.woff2') format('woff2');
+    font-display: swap;
+  }
+  /* Sweetie 16 色盤 */
+  :root {
+    --night: #1a1c2c; --plum: #5d275d; --red: #b13e53; --orange: #ef7d57; --gold: #ffcd75;
+    --lime: #a7f070; --green: #38b764; --teal: #257179; --navy: #29366f; --blue: #3b5dc9;
+    --sky: #41a6f6; --cyan: #73eff7; --white: #f4f4f4; --mist: #94b0c2; --slate: #566c86; --ink: #333c57;
+    --bg: var(--night); --card: var(--navy); --text: var(--white); --sub: var(--mist); --line: var(--white);
+    --accent: var(--gold); --danger: var(--orange);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  .screen * { border-radius: 0 !important; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    overflow: hidden;
+  }
+
+  /* ===== 版面：手機＝全螢幕（RWD）；電腦＝掌機外殼裡的螢幕 ===== */
+  .console, .bezel { display: contents; }
+  .bezel-top, .brand, .controls { display: none; }
+  .screen {
+    position: relative; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+    background-size: 8px 8px;
+  }
+  .screen-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .backdrop { position: absolute; inset: 0; background: rgba(10,10,20,.7); z-index: 15; }
+  /* 像素字只用在標題與大數字，內文用一般字體以利閱讀 */
+  .px, header.top h1, .card h2, dialog.sheet h3, .now .label, .tile .v, .month-nav .title, .bar-label, .cal .d .n {
+    font-family: 'Cubic11', ui-monospace, Menlo, monospace; -webkit-font-smoothing: none; font-weight: 400;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  .wrap { max-width: 540px; margin: 0 auto; padding: 16px 16px 24px; }
+  header.top { display: flex; align-items: center; justify-content: space-between; padding: 6px 2px 16px; gap: 8px; }
+  header.top h1 { font-size: 24px; margin: 0; color: var(--gold); text-shadow: 3px 3px 0 var(--red), 5px 5px 0 #000; letter-spacing: .04em; }
+  header.top .date { color: var(--cyan); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* 像素視窗 */
+  .card, .tile {
+    background: var(--card); border: 3px solid var(--white);
+    box-shadow: inset 0 0 0 3px var(--night), 6px 6px 0 #000; padding: 16px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 18px; margin: 0 0 12px; color: var(--gold); font-weight: 400; }
+  .card h2::before { content: '▶ '; color: var(--white); }
+  #sprite { display: inline-block; width: 30px; height: 30px; margin-right: 10px; vertical-align: -5px; animation: bob 1.2s steps(2) infinite; }
+  #sprite svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
+  .lv { font-family: 'Cubic11', ui-monospace, monospace; font-size: 13px; color: var(--cyan); border: 2px solid var(--cyan); padding: 0 5px; margin-left: 8px; vertical-align: 4px; }
+  .muted { color: var(--sub); }
+  .small { font-size: 14px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row.wrap-row { flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .hidden { display: none !important; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .blink { animation: blink 1s steps(1) infinite; }
+  @keyframes bob { 50% { transform: translateY(-4px); } }
+
+  /* 目前狀態（對話框） */
+  .now { display: flex; gap: 14px; align-items: center; }
+  .now .emoji { font-size: 38px; width: 68px; height: 68px; display: grid; place-items: center; background: var(--night); border: 3px solid var(--c, var(--white)); flex: none; animation: bob 1.2s steps(2) infinite; }
+  .now .label { font-size: 24px; color: var(--white); }
+  .now .label b { color: var(--gold); font-weight: 400; }
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+  .fact { background: var(--night); border: 2px solid var(--slate); padding: 6px 8px; }
+  .fact .k { font-size: 13px; color: var(--sub); }
+  .fact .v { font-size: 17px; font-weight: 600; color: var(--white); font-variant-numeric: tabular-nums; }
+  .fact .v.bad { color: var(--danger); }
+  .bar-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); margin-top: 12px; }
+  .hp { height: 14px; background: var(--night); border: 2px solid var(--white); padding: 2px; display: flex; }
+  .hp > div { height: 100%; background: repeating-linear-gradient(90deg, var(--fill, var(--lime)) 0 6px, transparent 6px 8px); }
+
+  /* 時間選擇 */
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 2px solid var(--mist); background: var(--night); padding: 4px 10px; font-size: 14px; cursor: pointer; color: var(--mist); }
+  .chip[aria-pressed="true"] { background: var(--gold); color: var(--night); border-color: var(--gold); }
+  .custom-time { margin-top: 10px; }
+
+  /* 狀態按鈕 */
+  .status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .status-btn {
+    border: 3px solid var(--white); background: var(--night); padding: 10px 2px 8px; box-shadow: 4px 4px 0 #000;
+    display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; position: relative;
+    border-top: 6px solid var(--c);
+  }
+  .status-btn:active { transform: translate(4px, 4px); box-shadow: none; }
+  .status-btn .e { font-size: 26px; line-height: 1.2; }
+  .status-btn .t { font-size: 14px; font-weight: 600; line-height: 1.25; }
+  .status-btn.current { background: var(--ink); outline: 3px solid var(--gold); outline-offset: 2px; }
+  .status-btn.current::before { content: '▼'; position: absolute; top: -26px; color: var(--gold); animation: blink 1s steps(1) infinite; }
+  .status-btn.leave-btn { border-style: dashed; border-top-style: solid; }
+
+  input[type=text], input[type=password], input[type=time], input[type=date], input[type=datetime-local], select, textarea {
+    width: 100%; border: 2px solid var(--mist); background: var(--night); padding: 8px 10px; color: var(--white);
+    color-scheme: dark;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+  label.f { display: block; margin-bottom: 12px; }
+  label.f > span { display: block; font-size: 14px; color: var(--sub); margin-bottom: 4px; }
+  label.f > span.row { display: flex; }
+
+  .btn { border: 3px solid var(--white); background: var(--ink); padding: 9px 14px; cursor: pointer; box-shadow: 4px 4px 0 #000; color: var(--white); }
+  .btn:active { transform: translate(4px, 4px); box-shadow: none; }
+  .btn.primary { background: var(--gold); color: var(--night); }
+  .btn.line { background: var(--green); color: var(--white); }
+  .btn.danger { color: var(--orange); }
+  .btn.block { width: 100%; }
+  .btn.sm { padding: 4px 10px; font-size: 13px; border-width: 2px; box-shadow: 3px 3px 0 #000; }
+  .linkbtn { background: none; border: 0; color: var(--sub); text-decoration: underline; cursor: pointer; padding: 4px; font-size: 13px; }
+
+  .banner { background: var(--plum); border: 3px solid var(--orange); box-shadow: 6px 6px 0 #000; padding: 10px 12px; margin-bottom: 18px; display: flex; gap: 10px; align-items: center; }
+
+  /* 月曆 */
+  .month-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 6px; }
+  .month-nav .title { font-size: 20px; color: var(--gold); }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal .wd { text-align: center; font-size: 13px; color: var(--sub); }
+  .cal .d {
+    aspect-ratio: 1 / 1.15; background: var(--night); border: 2px solid var(--slate); padding: 3px 1px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between; color: var(--white);
+  }
+  .cal .d .n { font-size: 15px; }
+  .cal .d .s { font-size: 11px; line-height: 1.1; color: var(--sub); white-space: nowrap; overflow: hidden; max-width: 100%; }
+  .cal .d .bar { width: 70%; height: 5px; }
+  .cal .d.today { border-color: var(--gold); }
+  .cal .d.off { background: transparent; border-color: transparent; }
+  .cal .d.off .n { color: var(--slate); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; font-size: 13px; color: var(--sub); }
+  .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+
+  /* 時間軸 */
+  .timeline { position: relative; height: 30px; background: var(--night); border: 2px solid var(--white); overflow: hidden; margin: 6px 0 4px; }
+  .timeline .seg { position: absolute; top: 0; bottom: 0; }
+  .timeline .seg.open { background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.4) 0 3px, transparent 3px 6px) !important; }
+  .timeline .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--gold); }
+  .timeline .lunchband { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, rgba(255,255,255,.08) 0 2px, transparent 2px 6px); }
+  .tl-scale { position: relative; height: 16px; font-size: 11px; color: var(--sub); }
+  .tl-scale span { position: absolute; transform: translateX(-50%); }
+
+  .list { margin: 0; padding: 0; list-style: none; }
+  .list li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 2px dotted var(--slate); }
+  .list li:last-child { border-bottom: 0; }
+  .list .time { font-variant-numeric: tabular-nums; color: var(--cyan); width: 48px; flex: none; }
+  .dot { width: 10px; height: 10px; flex: none; }
+
+  /* 每日上線時刻 */
+  .arr { display: grid; grid-template-columns: 76px 1fr 64px; align-items: center; column-gap: 8px; }
+  .arr .lbl { font-size: 13px; color: var(--sub); white-space: nowrap; }
+  .arr .val { font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .arr .track { position: relative; height: 22px; border-left: 1px solid var(--slate); }
+  .arr .track .ref { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--slate); }
+  .arr .track .ref.main { border-left-color: var(--gold); }
+  .arr .track .pt { position: absolute; top: 50%; width: 12px; height: 12px; transform: translate(-50%, -50%); background: var(--green); box-shadow: 0 0 0 2px var(--card); }
+  .arr .track .pt.late { background: var(--red); }
+  .arr .track .none { position: absolute; left: 6px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--slate); }
+  .arr .row-hit { display: contents; }
+  .arr .row-hit:hover .lbl, .arr .row-hit:hover .val { color: var(--gold); }
+  .arr .axis { position: relative; height: 18px; font-size: 11px; color: var(--sub); }
+  .arr .axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .arr-sum { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--sub); margin-top: 12px; }
+  .arr-sum b { color: var(--white); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* 統計 */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tile { margin: 0; padding: 12px 14px; }
+  .tile .k { font-size: 14px; color: var(--gold); font-weight: 600; }
+  .tile .v { font-size: 30px; font-variant-numeric: tabular-nums; line-height: 1.3; margin-top: 2px; color: var(--white); }
+  .tile .v small { font-size: 15px; font-family: -apple-system, "PingFang TC", sans-serif; color: var(--sub); margin-left: 2px; }
+  .tile .d { font-size: 13px; color: var(--sub); margin-top: 2px; }
+  .tile.wide { grid-column: 1 / -1; }
+  .meter { height: 14px; background: var(--night); border: 2px solid var(--white); padding: 2px; margin-top: 8px; display: flex; }
+  .meter > div { height: 100%; }
+
+  /* 魔王選單 */
+  .boss-bar { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; margin-bottom: 8px; scrollbar-width: thin; }
+  .boss-chip { flex: none; border: 3px solid var(--slate); background: var(--night); color: var(--mist); padding: 6px 12px; cursor: pointer; box-shadow: 3px 3px 0 #000; white-space: nowrap; }
+  .boss-chip .lvl { font-family: 'Cubic11', ui-monospace, monospace; color: var(--cyan); }
+  .boss-chip[aria-pressed="true"] { border-color: var(--gold); color: var(--white); background: var(--ink); }
+  .boss-chip[aria-pressed="true"] .lvl { color: var(--gold); }
+  .boss-chip.add { border-style: dashed; }
+  .boss-note { margin-top: 12px; padding: 8px 10px; background: var(--night); border-left: 4px solid var(--cyan); font-size: 14px; white-space: pre-wrap; display: flex; gap: 8px; align-items: flex-start; }
+  .boss-note .t { flex: 1; }
+
+  /* 登入 */
+  body:not(.ready) nav.tabs, body:not(.ready) #boss-bar, body:not(.ready) main > section:not(#view-loading) { display: none !important; }
+  body.ready #view-loading { display: none; }
+  .loading { text-align: center; padding-top: 60px; font-family: 'Cubic11', ui-monospace, monospace; font-size: 22px; color: var(--gold); }
+  .role { font-size: 12px; border: 2px solid var(--slate); color: var(--mist); padding: 0 6px; margin-left: 8px; white-space: nowrap; }
+  .role.gm { border-color: var(--gold); color: var(--gold); }
+  button.role { background: none; font: inherit; font-size: 12px; cursor: pointer; }
+  .role.online { border-color: var(--green); color: var(--lime); }
+  .login-err { color: var(--orange); font-size: 14px; min-height: 22px; margin: 4px 0 8px; }
+
+  /* 底部導覽 */
+  nav.tabs {
+    flex: none; background: var(--night); border-top: 3px solid var(--white);
+    display: flex; justify-content: center; padding-bottom: env(safe-area-inset-bottom); z-index: 5;
+  }
+  nav.tabs .in { display: flex; width: 100%; max-width: 540px; }
+  nav.tabs button { flex: 1; border: 0; background: none; padding: 8px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--mist); cursor: pointer; font-size: 13px; position: relative; }
+  nav.tabs button .i { font-size: 20px; line-height: 1.2; filter: grayscale(1) brightness(.7); }
+  nav.tabs button[aria-current="page"] { color: var(--gold); }
+  nav.tabs button[aria-current="page"] .i { filter: none; }
+
+  /* 底部面板 */
+  dialog.sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; top: auto; z-index: 20;
+    border: 3px solid var(--white); padding: 0; margin: 0 auto; width: 100%; max-width: 540px; max-height: 88%;
+    background: var(--night); color: var(--text); box-shadow: inset 0 0 0 3px var(--navy);
+  }
+  dialog.sheet[open] { display: flex; flex-direction: column; }
+  dialog.sheet .sheet-in { padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); overflow-y: auto; min-height: 0; }
+  dialog.sheet h3 { margin: 0 0 14px; font-size: 20px; color: var(--gold); }
+  .sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+
+  .toast { position: absolute; z-index: 30; white-space: nowrap; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--night); color: var(--gold); border: 3px solid var(--gold); box-shadow: 4px 4px 0 #000; padding: 8px 16px; font-size: 14px; z-index: 50; opacity: 0; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .var-chip { font-size: 12px; background: var(--night); border: 1px solid var(--slate); padding: 1px 5px; margin: 2px; display: inline-block; color: var(--cyan); }
+  @media (max-width: 480px) {
+    header.top { flex-wrap: wrap; row-gap: 4px; }
+    header.top h1 { font-size: 20px; white-space: nowrap; }
+    .fact .v { font-size: 15px; }
+  }
+  @media (max-width: 380px) { .status-grid { grid-template-columns: repeat(3, 1fr); } }
+
+  /* ===== 電腦版：MAOU BOY 掌機 ===== */
+  @media (min-width: 900px) and (min-height: 640px) {
+    body {
+      overflow: auto; display: grid; place-items: center; padding: 2vh 0;
+      background: radial-gradient(circle at 30% 20%, #3b3f58 0%, #1b1c28 55%, #101118 100%);
+    }
+    .console {
+      display: flex; flex-direction: column; position: relative;
+      width: 620px; height: min(96vh, 1000px);
+      padding: 24px 28px 18px;
+      background: linear-gradient(160deg, #dedcd2 0%, #c9c7bb 60%, #b9b7aa 100%);
+      border-radius: 18px 18px 96px 18px;
+      box-shadow: inset -6px -8px 0 rgba(0,0,0,.12), inset 4px 4px 0 rgba(255,255,255,.55), 0 40px 80px rgba(0,0,0,.6);
+    }
+    .bezel {
+      display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+      padding: 12px 24px 26px; background: #4b4f66; border-radius: 12px 12px 48px 12px;
+      box-shadow: inset 0 2px 0 rgba(255,255,255,.12), inset 0 -3px 0 rgba(0,0,0,.25);
+    }
+    .bezel-top { display: flex; align-items: center; gap: 8px; margin: 0 -14px 10px; color: #a9aec8; font: 10px/1 'Cubic11', ui-monospace, monospace; letter-spacing: .12em; }
+    .bezel-top .stripe { flex: 1; height: 6px; background: linear-gradient(var(--red) 0 2px, transparent 2px 4px, var(--blue) 4px 6px); }
+    .led { width: 10px; height: 10px; border-radius: 50%; background: #e2334a; box-shadow: 0 0 8px #ff3b54; margin-left: -10px; }
+    .screen { height: auto; flex: 1 1 auto; min-height: 0; border: 4px solid #0c0d13; box-shadow: 0 0 0 2px #2a2d3d; }
+    .brand { display: block; margin: 12px 6px 4px; font: italic 900 25px/1 "Arial Black", "Helvetica Neue", sans-serif; letter-spacing: .02em; color: #2d3b8f; text-shadow: 0 1px 0 rgba(255,255,255,.5); }
+    .brand small { font: 400 11px/1 'Cubic11', ui-monospace, monospace; color: #6d6f7e; margin-left: 8px; letter-spacing: .1em; font-style: normal; }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; flex: none; height: 200px; position: relative; padding: 14px 10px 0; }
+    .controls button { cursor: pointer; font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
+    .dpad { position: relative; width: 120px; height: 120px; }
+    .dpad button, .dpad .center { position: absolute; width: 40px; height: 40px; border: 0; background: #23242d; box-shadow: 0 4px 0 #0e0f14; color: #4b4e5e; font-size: 14px; }
+    .dpad .up { left: 40px; top: 0; border-radius: 6px 6px 0 0; }
+    .dpad .down { left: 40px; top: 80px; border-radius: 0 0 6px 6px; }
+    .dpad .left { left: 0; top: 40px; border-radius: 6px 0 0 6px; }
+    .dpad .right { left: 80px; top: 40px; border-radius: 0 6px 6px 0; }
+    .dpad .center { left: 40px; top: 40px; }
+    .ab { justify-self: end; display: flex; gap: 18px; align-items: flex-start; transform: rotate(-24deg); margin: 18px 6px 0 0; }
+    .ab .key { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #2d3b8f; font: 700 14px/1 'Cubic11', ui-monospace, monospace; }
+    .ab button { width: 58px; height: 58px; border-radius: 50%; border: 0; background: #9b2c5a; box-shadow: 0 5px 0 #5e1735, inset 0 3px 0 rgba(255,255,255,.18); }
+    .ab .key:last-child { margin-top: -22px; }
+    .startselect { grid-column: 1 / -1; display: flex; justify-content: center; gap: 26px; margin-top: 4px; }
+    .startselect .key { display: flex; flex-direction: column; align-items: center; gap: 6px; transform: rotate(-24deg); color: #2d3b8f; font: 10px/1 'Cubic11', ui-monospace, monospace; letter-spacing: .1em; }
+    .startselect button { width: 56px; height: 14px; border-radius: 8px; border: 0; background: #8b8e9e; box-shadow: 0 3px 0 #55586a; }
+    .controls button:active, .controls button.pressed { transform: translateY(3px); box-shadow: none; filter: brightness(.9); }
+    .speaker { position: absolute; right: 18px; bottom: 4px; width: 96px; height: 56px; transform: rotate(-24deg);
+      background: repeating-linear-gradient(90deg, transparent 0 10px, rgba(0,0,0,.22) 10px 15px); border-radius: 4px; }
+    .brand { display: flex; align-items: baseline; }
+    .brand .hint { margin-left: auto; font: 10px/1.4 'Cubic11', ui-monospace, monospace; color: #7a7c8a; letter-spacing: .05em; font-style: normal; text-shadow: none; }
+    /* 螢幕內的版面縮小一點 */
+    .screen .wrap { padding: 12px 14px 20px; }
+    .screen header.top { padding: 2px 2px 10px; }
+    .screen header.top h1 { font-size: 20px; white-space: nowrap; }
+    .screen-scroll { scrollbar-width: thin; scrollbar-color: var(--slate) transparent; }
+    .screen-scroll::-webkit-scrollbar { width: 6px; }
+    .screen-scroll::-webkit-scrollbar-thumb { background: var(--slate); }
+    /* --- 外觀：橫式掌機（MAOU PORTABLE） --- */
+    html[data-skin="wide"] .console {
+      display: grid; grid-template-columns: 190px 1fr 190px; grid-template-rows: 1fr auto; column-gap: 6px;
+      width: min(1160px, 96vw); height: min(620px, 92vh); padding: 28px 30px 18px;
+      border-radius: 140px / 120px; background: linear-gradient(180deg, #2f3240 0%, #181a22 70%, #111218 100%);
+      box-shadow: inset 0 2px 0 rgba(255,255,255,.18), inset 0 -5px 0 rgba(0,0,0,.5), 0 40px 80px rgba(0,0,0,.65);
+    }
+    html[data-skin="wide"] .bezel { grid-column: 2; grid-row: 1; border-radius: 10px; padding: 10px 14px 14px; background: #0b0c11; box-shadow: inset 0 0 0 2px #262938; }
+    html[data-skin="wide"] .bezel-top { margin: 0 0 8px; color: #6f7389; }
+    html[data-skin="wide"] .led { margin-left: 0; background: #39d98a; box-shadow: 0 0 8px #39d98a; }
+    html[data-skin="wide"] .screen .wrap { max-width: 760px; }
+    html[data-skin="wide"] .controls { display: contents; }
+    html[data-skin="wide"] .dpad { grid-column: 1; grid-row: 1; align-self: center; justify-self: center; transform: scale(1.1); }
+    html[data-skin="wide"] .dpad button, html[data-skin="wide"] .dpad .center { background: #3a3d4c; box-shadow: 0 4px 0 #0b0c11; color: #8b8fa6; }
+    html[data-skin="wide"] .ab { grid-column: 3; grid-row: 1; align-self: center; justify-self: center; transform: rotate(-20deg); margin: 0; }
+    html[data-skin="wide"] .ab .key { color: #cfd3e6; }
+    html[data-skin="wide"] .ab button { background: #3a3d4c; box-shadow: 0 5px 0 #0b0c11, inset 0 3px 0 rgba(255,255,255,.1); }
+    html[data-skin="wide"] .ab .key:last-child button { background: #b13e53; box-shadow: 0 5px 0 #5e1735; }
+    html[data-skin="wide"] .startselect { grid-column: 2; grid-row: 2; margin-top: 12px; }
+    html[data-skin="wide"] .startselect .key { transform: none; color: #8b8fa6; }
+    html[data-skin="wide"] .startselect button { background: #3a3d4c; box-shadow: 0 3px 0 #0b0c11; }
+    html[data-skin="wide"] .brand { grid-column: 1; grid-row: 2; align-self: center; justify-self: center; margin: 8px 0 0; font-size: 16px; color: #cfd3e6; text-shadow: none; }
+    html[data-skin="wide"] .brand small, html[data-skin="wide"] .brand .hint { display: none; }
+    html[data-skin="wide"] .speaker { grid-column: 3; grid-row: 2; position: static; justify-self: center; align-self: center; margin-top: 8px; transform: none; width: 90px; height: 22px;
+      background: repeating-linear-gradient(90deg, transparent 0 6px, rgba(255,255,255,.14) 6px 9px); }
+
+    /* --- 外觀：無外殼 --- */
+    html[data-skin="none"] .console { width: 560px; height: 96vh; padding: 0; background: none; box-shadow: none; border-radius: 0; }
+    html[data-skin="none"] .bezel { padding: 0; background: none; box-shadow: none; border-radius: 0; }
+    html[data-skin="none"] .bezel-top, html[data-skin="none"] .brand, html[data-skin="none"] .controls { display: none; }
+    html[data-skin="none"] .screen { border: 3px solid var(--white); box-shadow: 8px 8px 0 #000; }
+
+    /* 機身名稱依外觀切換 */
+    .brand .name-wide { display: none; }
+    html[data-skin="wide"] .brand .name-boy { display: none; }
+    html[data-skin="wide"] .brand .name-wide { display: inline; }
+  }
+  @media (prefers-reduced-motion: reduce) { .blink, .now .emoji, .status-btn.current::before { animation: none; } }
+</style>
+</head>
+<body>
+<div class="console">
+<div class="bezel">
+  <div class="bezel-top" aria-hidden="true"><span class="led"></span><span>BATTERY</span><span class="stripe"></span><span>PIXEL LOG SYSTEM</span><span class="stripe" style="flex:.3"></span></div>
+  <div class="screen" id="screen">
+  <div class="screen-scroll" id="scroll">
+<div class="wrap">
+  <header class="top">
+    <h1 id="title"><span id="sprite"></span>魔王出沒紀錄</h1>
+    <span class="date" id="clock"></span>
+  </header>
+  <div class="boss-bar" id="boss-bar"></div>
+  <main>
+    <section id="view-loading"><div class="loading blink">LOADING…</div></section>
+    <section id="view-record"></section>
+    <section id="view-calendar" class="hidden"></section>
+    <section id="view-stats" class="hidden"></section>
+    <section id="view-settings" class="hidden"></section>
+  </main>
+</div>
+  </div>
+
+<nav class="tabs"><div class="in">
+  <button data-tab="record" aria-current="page"><span class="i">⚔️</span>冒險</button>
+  <button data-tab="calendar"><span class="i">🗺️</span>地圖</button>
+  <button data-tab="stats"><span class="i">🏆</span>成就</button>
+  <button data-tab="settings"><span class="i">📜</span>選單</button>
+</div></nav>
+
+<div class="backdrop" id="backdrop" hidden></div>
+<dialog class="sheet" id="sheet"><div class="sheet-in" id="sheet-in"></div></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+</div>
+<div class="brand" aria-hidden="true"><span class="name-boy">MAOU BOY</span><span class="name-wide">MAOU PORTABLE</span><small>PIXEL LOG</small><span class="hint">← → 換頁　Z 確認　X 關閉　SHIFT 換魔王</span></div>
+<div class="controls" aria-label="掌機按鍵（鍵盤：方向鍵、Z、X、Enter、Shift）">
+  <div class="dpad">
+    <button class="up" data-key="up" aria-label="上捲">▲</button>
+    <button class="left" data-key="left" aria-label="上一頁">◀</button>
+    <span class="center"></span>
+    <button class="right" data-key="right" aria-label="下一頁">▶</button>
+    <button class="down" data-key="down" aria-label="下捲">▼</button>
+  </div>
+  <div class="ab">
+    <div class="key"><button data-key="b" aria-label="B：關閉"></button>B</div>
+    <div class="key"><button data-key="a" aria-label="A：確認／分享"></button>A</div>
+  </div>
+  <div class="startselect">
+    <div class="key"><button data-key="select" aria-label="SELECT：切換魔王"></button>SELECT</div>
+    <div class="key"><button data-key="start" aria-label="START：回到冒險"></button>START</div>
+  </div>
+  <div class="speaker" aria-hidden="true"></div>
+</div>
+</div>
+
+<script type="module">
+import * as R from './rules.js';
+import { store, account, loadCalendar, watchOnline } from './store.js';
+import { VERSION } from './version.js';
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+
+// 有些瀏覽器（例如封鎖網站資料的內嵌瀏覽器）存取 localStorage 會丟錯，不能因此整頁打不開
+const storage = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 記不住就算了 */ } },
+};
+
+const ui = {
+  tab: 'record',
+  month: R.dateKey(Date.now()).slice(0, 7),
+  offset: 0,           // 0 / 5 / 15 / 30 分鐘前，或 'custom'
+  note: '',            // 記錄頁尚未送出的旁白（重繪時保留）
+  user: null,
+  isEditor: false,     // 登入的帳號在編輯名單裡
+  viewOnly: storage.get('maou-log:view-only') === '1', // 編輯者自己切到觀戰，避免誤觸
+  canEdit: false,      // 實際能不能編輯 = 編輯者且沒有切到觀戰
+  online: null,        // 同時在線人數（含沒登入的）
+  bossId: bossFromHash() || storage.get('maou-log:boss') || null,
+  customAt: null,
+  calendar: {},
+  calStatus: {},       // { 2026: { ok, error } }
+};
+
+// ---------- 日期工具 ----------
+// 網址 #b=<魔王 id>；格式壞掉（例如被截斷）就當作沒有
+function bossFromHash() {
+  const m = location.hash.match(/^#b=([^&]+)/);
+  try { return m ? decodeURIComponent(m[1]) : ''; } catch { return ''; }
+}
+
+const todayKey = () => R.dateKey(Date.now());
+const nowMin = () => R.minutesOf(Date.now());
+function parseDate(k) { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); }
+function fmtDate(k, withYear = false) {
+  const d = parseDate(k);
+  return `${withYear ? d.getFullYear() + '/' : ''}${d.getMonth() + 1}/${d.getDate()}（${WEEK[d.getDay()]}）`;
+}
+const addDays = R.addDays;
+const msAt = R.taipeiMs;
+function toLocalInput(ms) { return `${R.dateKey(ms)}T${R.fmtMin(R.minutesOf(ms))}`; }
+
+// ---------- 資料 ----------
+const DB = await store.getAll();
+
+async function ensureCalendar(year) {
+  if (ui.calStatus[year]) return;
+  ui.calStatus[year] = { loading: true };
+  const r = await loadCalendar(year);
+  ui.calStatus[year] = { ok: r.ok, error: r.error };
+  Object.assign(ui.calendar, r.data);
+  render();
+}
+
+function dayInfo(date) { return R.dayType(date, ui.calendar, DB.settings.overrides); }
+
+// ---------- 魔王 ----------
+// 目前選的魔王；地圖、成就、日誌都只看這隻
+const currentBoss = () => DB.bosses.find((b) => b.id === ui.bossId) || null;
+const bossName = (b = currentBoss()) => R.bossLabel(b);
+const bossEvents = (id = ui.bossId) => DB.events.filter((e) => e.boss === id);
+const bossLeaves = (id = ui.bossId) => DB.leaves.filter((l) => l.boss === id);
+
+// 不自動挑魔王，沒選就看不到資料。選的魔王暫時不在清單裡（例如本機快取還沒有新魔王）時保留選擇，
+// 等資料同步到了就會顯示；真的被刪掉的魔王會顯示「請先選擇」。
+
+// 沒有選魔王時，冒險／地圖／成就都只顯示這張卡片
+function noBossCard(el) {
+  const has = DB.bosses.length > 0;
+  el.innerHTML = `<div class="card" style="text-align:center">
+    <div class="now" style="justify-content:center"><div class="emoji">${has ? '👆' : '❔'}</div></div>
+    <p>${has ? '請先從上方選擇要觀戰的魔王' : '還沒有魔王出沒'}</p>
+    ${!has && ui.canEdit ? '<button class="btn primary" id="first-boss">＋ 新增第一隻魔王</button>' : ''}</div>`;
+  $('#first-boss', el)?.addEventListener('click', () => openBossEditor());
+}
+window.addEventListener('hashchange', () => {
+  const id = bossFromHash();
+  if (id && id !== ui.bossId) { ui.bossId = id; storage.set('maou-log:boss', id); render(); }
+});
+function selectBoss(id) {
+  ui.bossId = id;
+  storage.set('maou-log:boss', id);
+  history.replaceState(null, '', `#b=${encodeURIComponent(id)}`);
+  render();
+}
+
+// 魔王選單：每隻魔王顯示今天的最新狀態
+function renderBossBar() {
+  const today = todayKey();
+  const chips = DB.bosses.map((b) => {
+    const last = bossEvents(b.id).filter((e) => R.dateKey(e.at) === today).sort((x, y) => y.at - x.at)[0];
+    const icon = last ? R.STATUSES[last.status].emoji : '💤';
+    return `<button class="boss-chip" data-boss="${esc(b.id)}" aria-pressed="${b.id === ui.bossId}">${icon} <span class="lvl">Lv.${b.level}</span> ${esc(b.name)}</button>`;
+  }).join('');
+  $('#boss-bar').innerHTML = chips
+    + (ui.canEdit ? '<button class="boss-chip add" id="boss-add">＋ 新增魔王</button>' : '')
+    + (!DB.bosses.length && !ui.canEdit ? '<span class="muted small">還沒有魔王出沒</span>' : '');
+  $$('[data-boss]').forEach((b) => b.onclick = () => selectBoss(b.dataset.boss));
+  $('#boss-add')?.addEventListener('click', () => openBossEditor());
+}
+
+function openBossEditor(boss) {
+  const count = boss ? bossEvents(boss.id).length + bossLeaves(boss.id).length : 0;
+  openSheet(`
+    <h3>${boss ? '編輯魔王' : '新增魔王'}</h3>
+    <div class="row">
+      <label class="f" style="width:110px"><span>等級</span><input type="text" id="b-level" inputmode="numeric" value="${boss ? boss.level : ''}" placeholder="30"></label>
+      <label class="f" style="flex:1"><span>名稱</span><input type="text" id="b-name" maxlength="20" value="${esc(boss?.name || '魔王')}"></label>
+    </div>
+    <label class="f"><span>屬性備註（觀戰者也看得到）</span><textarea id="b-note" maxlength="200" placeholder="例如：愛喝咖啡、週三固定開會">${esc(boss?.note || '')}</textarea></label>
+    <div class="sheet-actions">
+      ${boss ? '<button class="btn danger" id="b-del">刪除</button>' : '<button class="btn" id="b-cancel">取消</button>'}
+      <button class="btn primary" id="b-save">儲存</button>
+    </div>
+  `, (el) => {
+    $('#b-save', el).onclick = async () => {
+      const level = Number($('#b-level', el).value);
+      const name = $('#b-name', el).value.trim() || '魔王';
+      const note = $('#b-note', el).value.trim();
+      if (!Number.isInteger(level) || level < 1 || level > 999) { toast('等級請填 1–999 的整數'); return; }
+      if (boss) await store.updateBoss(boss.id, { level, name, note });
+      else { const b = await store.addBoss({ level, name, note }); ui.bossId = b.id; }
+      closeSheet();
+      toast('已儲存');
+      selectBoss(ui.bossId);
+    };
+    $('#b-cancel', el)?.addEventListener('click', closeSheet);
+    $('#b-del', el)?.addEventListener('click', async (e) => {
+      const b = e.currentTarget;
+      if (!b.dataset.armed) {
+        b.dataset.armed = '1';
+        b.textContent = count ? `連同 ${count} 筆紀錄一起刪？再按一次` : '再按一次確定刪除';
+        return;
+      }
+      try { await store.deleteBoss(boss.id); toast('已刪除'); } catch (err) { toast('刪除失敗：' + (err.code || err.message)); }
+      closeSheet();
+      render();
+    });
+  });
+}
+
+function evalDate(date) {
+  const info = dayInfo(date);
+  const day = R.evaluateDay({
+    date,
+    events: bossEvents().filter((e) => R.dateKey(e.at) === date),
+    leaves: bossLeaves().filter((l) => l.date === date),
+    workday: info.workday,
+    today: todayKey(),
+    nowMin: nowMin(),
+  });
+  day.reason = info.reason;
+  return day;
+}
+
+// 像素魔王（12×12）
+const SPRITE = [
+  '.H........H.',
+  'HH........HH',
+  'HRRRRRRRRRRH',
+  '.RRRRRRRRRR.',
+  'RRWWRRRRWWRR',
+  'RRWKRRRRWKRR',
+  'RRRRRRRRRRRR',
+  'RRRKKKKKKRRR',
+  'RRKWKKKKWKRR',
+  '.RRRRRRRRRR.',
+  '..RR....RR..',
+  '.RRR....RRR.',
+];
+function drawSprite() {
+  const color = { H: '#ffcd75', R: '#b13e53', W: '#f4f4f4', K: '#1a1c2c' };
+  const rects = SPRITE.flatMap((row, y) => [...row].map((c, x) => (color[c] ? `<rect x="${x}" y="${y}" width="1" height="1" fill="${color[c]}"/>` : ''))).join('');
+  $('#sprite').innerHTML = `<svg viewBox="0 0 12 12" aria-hidden="true">${rects}</svg>`;
+}
+
+function latestEvent() {
+  return bossEvents().sort((a, b) => b.at - a.at)[0] || null;
+}
+
+// ---------- 共用 UI ----------
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+const sheet = $('#sheet');
+// 面板顯示在「螢幕」裡（電腦版是掌機螢幕），所以不用 showModal 的全視窗遮罩
+function openSheet(html, bind) {
+  $('#sheet-in').innerHTML = html;
+  $('#sheet-in').scrollTop = 0;
+  if (!sheet.open) { sheet.show(); $('#backdrop').hidden = false; }
+  bind?.($('#sheet-in'));
+}
+function closeSheet() { sheet.close(); }
+sheet.addEventListener('close', () => { $('#backdrop').hidden = true; });
+$('#backdrop').addEventListener('click', closeSheet);
+
+function render() {
+  if (!document.body.classList.contains('ready')) return;
+  renderBossBar();
+  const role = ui.canEdit ? '✏️ GM' : ui.isEditor ? '👀 觀戰（GM）' : '👀 觀戰';
+  $('#clock').innerHTML = `${fmtDate(todayKey())} ${R.fmtMin(nowMin())}`
+    + (ui.isEditor
+      ? `<button class="role ${ui.canEdit ? 'gm' : ''}" id="role" title="切換 GM／觀戰模式">${role}</button>`
+      : `<span class="role" id="role">${role}</span>`)
+    + onlineBadge();
+  $('#role').onclick = ui.isEditor ? toggleViewOnly : null;
+  if (ui.tab === 'record') renderRecord();
+  if (ui.tab === 'calendar') renderCalendar();
+  if (ui.tab === 'stats') renderStats();
+  if (ui.tab === 'settings') renderSettings();
+}
+
+$$('nav.tabs button').forEach((b) => b.addEventListener('click', () => {
+  ui.tab = b.dataset.tab;
+  $$('nav.tabs button').forEach((x) => x === b ? x.setAttribute('aria-current', 'page') : x.removeAttribute('aria-current'));
+  $$('main > section').forEach((s) => s.classList.toggle('hidden', s.id !== `view-${ui.tab}`));
+  $('#scroll').scrollTo(0, 0);
+  render();
+}));
+
+// ---------- 掌機按鍵（電腦版畫面上的按鈕與鍵盤）----------
+const TABS = ['record', 'calendar', 'stats', 'settings'];
+const goTab = (name) => $(`nav.tabs [data-tab="${name}"]`).click();
+function pressKey(key) {
+  const btn = $(`.controls [data-key="${key}"]`);
+  if (btn) { btn.classList.add('pressed'); setTimeout(() => btn.classList.remove('pressed'), 120); }
+  if (!document.body.classList.contains('ready')) return;
+  const scroller = sheet.open ? $('#sheet-in') : $('#scroll');
+  if (key === 'up' || key === 'down') { scroller.scrollBy({ top: key === 'up' ? -160 : 160, behavior: 'smooth' }); return; }
+  if (key === 'b') { if (sheet.open) closeSheet(); else goTab('record'); return; }
+  if (sheet.open) { if (key === 'a') $('#sheet-in .btn.primary')?.click(); return; }
+  if (key === 'left' || key === 'right') {
+    const i = TABS.indexOf(ui.tab) + (key === 'left' ? -1 : 1);
+    goTab(TABS[(i + TABS.length) % TABS.length]);
+  } else if (key === 'start') goTab('record');
+  else if (key === 'select' && DB.bosses.length) {
+    const i = DB.bosses.findIndex((b) => b.id === ui.bossId);
+    selectBoss(DB.bosses[(i + 1) % DB.bosses.length].id);
+  } else if (key === 'a') {
+    if (ui.tab !== 'record') goTab('record');
+    $('#share-now')?.click();
+  }
+}
+$$('.controls [data-key]').forEach((b) => b.addEventListener('click', () => pressKey(b.dataset.key)));
+const KEYMAP = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', Z: 'a', x: 'b', X: 'b', Escape: 'b', Enter: 'start', Shift: 'select' };
+document.addEventListener('keydown', (e) => {
+  const key = KEYMAP[e.key];
+  if (!key || e.metaKey || e.ctrlKey || e.altKey) return;
+  const el = document.activeElement;
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(el?.tagName) || el?.isContentEditable;
+  if (typing && e.key !== 'Escape') return;                          // 打字時只保留 Esc 關閉
+  if (e.key === 'Enter' && el && el !== document.body) return;       // Enter 留給按鈕本身
+  e.preventDefault();
+  pressKey(key);
+});
+
+// ---------- 訊息 ----------
+function lateText(day) { return day.lateMinutes > 0 ? `（晚上線 ${R.fmtDuration(day.lateMinutes)}）` : ''; }
+
+function eventVars(ev, note) {
+  const date = R.dateKey(ev.at);
+  const day = evalDate(date);
+  return {
+    魔王: bossName(),
+    狀態: R.STATUSES[ev.status].label,
+    時間: R.fmtMin(R.minutesOf(ev.at)),
+    日期: fmtDate(date),
+    旁白: note ?? ev.note ?? '',
+    上線時間: R.fmtMin(day.arrival),
+    可下線: R.fmtMin(day.expectedLeave),
+    今日上線: R.fmtDuration(day.workMinutes),
+    晚上線: lateText(day),
+    失誤: R.faultText(day),
+    假別: '', 時段: '',
+  };
+}
+
+function leaveVars(lv) {
+  const span = R.leaveSpanText(lv);
+  return { 魔王: bossName(), 狀態: '閉關', 時間: '', 日期: fmtDate(lv.date), 旁白: lv.note || '', 上線時間: '', 可下線: '', 今日上線: '', 晚上線: '', 失誤: '', 假別: lv.type, 時段: span };
+}
+
+// LINE 的分享網址只有手機能用；電腦版改成複製文字（iPadOS 會偽裝成 Mac，用觸控點數判斷）
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+const onlineBadge = () => (ui.online == null ? '' : `<span class="role online" id="online">🟢 在線 ${ui.online}</span>`);
+
+// 分享目前狀態：任何人都能轉傳給自己的 LINE 好友
+function shareNow() {
+  const today = todayKey();
+  const last = latestEvent();
+  const cur = last && R.dateKey(last.at) === today ? last : null;
+  const lv = bossLeaves().find((l) => l.date === today);
+  const text = cur ? R.renderTemplate(DB.settings.templates[cur.status] || '', eventVars(cur))
+    : lv ? R.renderTemplate(DB.settings.templates.leave, leaveVars(lv))
+    : `❔ ${bossName()} 尚未上線（${fmtDate(today)}）`;
+  openNotify({ title: `📣 分享 ${bossName()} 的狀態`, text, prompt: '用 LINE 傳給你的好友，訊息可以先修改', doneLabel: '關閉' });
+}
+
+function openNotify({ title, text, undo, prompt = '要廣播給隊友嗎？訊息可以先修改', doneLabel = '不廣播' }) {
+  openSheet(`
+    <h3>${esc(title)}</h3>
+    <label class="f"><span>${esc(prompt)}</span>
+      <textarea id="msg">${esc(text)}</textarea></label>
+    <button class="btn line block" id="send">${IS_MOBILE ? '📣 廣播到 LINE' : '📋 複製戰報（貼到 LINE 電腦版）'}</button>
+    ${IS_MOBILE ? '' : '<div class="small muted" style="margin-top:6px">LINE 電腦版不支援直接分享，複製後貼到聊天室即可</div>'}
+    <div class="sheet-actions">
+      ${IS_MOBILE ? '<button class="btn" id="copy">複製文字</button>' : ''}
+      <button class="btn primary" id="done" ${IS_MOBILE ? '' : 'style="grid-column:1 / -1"'}>${esc(doneLabel)}</button>
+    </div>
+    ${undo ? '<div style="text-align:center;margin-top:8px"><button class="linkbtn" id="undo">↩ 按錯了，復原</button></div>' : ''}
+  `, (el) => {
+    const copy = async () => {
+      try { await navigator.clipboard.writeText($('#msg', el).value); return true; } catch { toast('無法複製，請手動選取'); return false; }
+    };
+    $('#send', el).onclick = async () => {
+      if (!IS_MOBILE) { if (await copy()) { toast('已複製，貼到 LINE 聊天室即可'); closeSheet(); } return; }
+      window.open('https://line.me/R/share?text=' + encodeURIComponent($('#msg', el).value), '_blank', 'noopener');
+      closeSheet();
+    };
+    $('#copy', el)?.addEventListener('click', async () => { if (await copy()) toast('已複製'); });
+    $('#done', el).onclick = closeSheet;
+    if (undo) $('#undo', el).onclick = async () => { await undo(); closeSheet(); toast('已復原'); render(); };
+  });
+}
+
+// ---------- 記錄頁 ----------
+function pickTime() {
+  if (ui.offset === 'custom') return ui.customAt ? R.taipeiMs(...ui.customAt.split('T')) : Date.now();
+  return Date.now() - ui.offset * 60000; // 保留秒數：同一分鐘內連續記錄也能排出先後
+}
+
+async function recordStatus(status) {
+  const at = pickTime();
+  if (!Number.isFinite(at)) { toast('時間格式不正確'); return; }
+  if (at > Date.now() + 60000) { toast('時間不能在未來'); return; }
+  const note = ui.note.trim();
+  const ev = await store.addEvent({ boss: ui.bossId, at, status, note });
+  ui.note = '';
+  ui.offset = 0;
+  render();
+  const tpl = DB.settings.templates[status] || '';
+  openNotify({
+    title: `✔ 已存檔：${R.STATUSES[status].emoji} ${R.STATUSES[status].label}・${R.fmtMin(R.minutesOf(at))}`,
+    text: R.renderTemplate(tpl, eventVars(ev, note)),
+    undo: () => store.deleteEvent(ev.id),
+  });
+}
+
+function findMissingOff() {
+  for (let i = 1; i <= 7; i++) {
+    const k = addDays(todayKey(), -i);
+    const d = evalDate(k);
+    if (d.state === 'missingOff') return d;
+  }
+  return null;
+}
+
+function renderRecord() {
+  const today = todayKey();
+  const day = evalDate(today);
+  const last = latestEvent();
+  const cur = last && R.dateKey(last.at) === today ? last : null;
+  const st = cur ? R.STATUSES[cur.status] : null;
+  const since = cur ? nowMin() - R.minutesOf(cur.at) : 0;
+  const missing = findMissingOff();
+  const info = dayInfo(today);
+  const exp = Math.min(100, (day.workMinutes / (day.requiredMinutes || R.SCHEDULE.dailyMinutes)) * 100);
+  const todayLeave = day.leaves.length
+    ? day.leaves.map((l) => `${l.type}・${R.leaveSpanText(l)}`).join('、')
+    : '';
+
+  const boss = currentBoss();
+  if (!boss) { noBossCard($('#view-record')); return; }
+  const who = `<span class="lv">Lv.${boss.level}</span> ${esc(boss.name)}`;
+
+  $('#view-record').innerHTML = `
+    ${missing && ui.canEdit ? `<div class="banner"><span>⚠️ ${fmtDate(missing.date)} 沒看到 ${esc(bossName())} 下線</span><span class="spacer"></span>
+      <button class="btn sm" id="fix-missing">補登</button></div>` : ''}
+
+    <div class="card">
+      <div class="now">
+        <div class="emoji" style="--c:${st ? st.color : 'var(--white)'}">${st ? st.emoji : (day.state === 'leave' ? '🏝️' : '❔')}</div>
+        <div>
+          <div class="label">${who} ${st ? `<b>${st.label}</b>` : (day.state === 'leave' ? '<b>閉關中</b>' : '尚未上線<span class="blink">_</span>')}</div>
+          <div class="muted small num">${cur ? `從 ${R.fmtMin(R.minutesOf(cur.at))} 開始・已 ${R.fmtDuration(since)}` : (info.workday ? '冒險日' : `休戰日${info.reason ? '・' + esc(info.reason) : ''}`)}
+            ${todayLeave ? `<br>閉關：${esc(todayLeave)}` : ''}</div>
+        </div>
+      </div>
+      ${day.arrival != null ? `
+      <div class="facts">
+        <div class="fact"><div class="k">上線</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
+        <div class="fact"><div class="k">可下線</div><div class="v">${R.fmtMin(day.expectedLeave)}</div></div>
+        <div class="fact"><div class="k">今日上線</div><div class="v">${R.fmtDuration(day.workMinutes)}</div></div>
+      </div>
+      <div class="bar-label"><span>EXP</span><span class="num">${Math.round(exp)}%</span></div>
+      <div class="hp"><div style="width:${exp}%"></div></div>
+      ${day.lateMinutes ? `<div class="small" style="color:var(--danger);margin-top:8px">晚上線 ${R.fmtDuration(day.lateMinutes)}</div>` : ''}` : ''}
+      ${boss.note || ui.canEdit ? `<div class="boss-note"><span class="t">📜 ${boss.note ? esc(boss.note) : '<span class="muted">還沒有屬性備註</span>'}</span>
+        ${ui.canEdit ? '<button class="btn sm" id="edit-boss">✏️ 編輯</button>' : ''}</div>` : ''}
+      <button class="btn line block" id="share-now" style="margin-top:14px">📣 分享目前狀態到 LINE</button>
+    </div>
+
+    ${ui.canEdit ? `<div class="card">
+      <h2>時光機</h2>
+      <div class="chips" id="offsets">
+        ${[[0, '現在'], [5, '5 分前'], [15, '15 分前'], [30, '30 分前'], ['custom', '自選']].map(([v, t]) =>
+          `<button class="chip" data-v="${v}" aria-pressed="${String(ui.offset) === String(v)}">${t}</button>`).join('')}
+      </div>
+      <div class="custom-time ${ui.offset === 'custom' ? '' : 'hidden'}">
+        <input type="datetime-local" id="custom-at" value="${ui.customAt || toLocalInput(Date.now())}">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>${esc(bossName())} 現在…</h2>
+      <div class="status-grid">
+        ${Object.entries(R.STATUSES).map(([k, s]) => `
+          <button class="status-btn ${cur?.status === k ? 'current' : ''}" style="--c:${s.color}" data-status="${k}">
+            <span class="e">${s.emoji}</span><span class="t">${s.label}</span></button>`).join('')}
+        <button class="status-btn leave-btn" id="add-leave"><span class="e">🏝️</span><span class="t">閉關</span></button>
+      </div>
+      <label class="f" style="margin:12px 0 0"><span>旁白（選填）</span>
+        <input type="text" id="note" placeholder="例如：出門打怪" maxlength="100" value="${esc(ui.note)}"></label>
+    </div>` : ''}
+
+    ${day.events.length ? `<div class="card"><h2>今日冒險日誌</h2>${eventList(day)}</div>` : ''}
+  `;
+
+  bindEventList($('#view-record'));
+  $('#share-now').onclick = shareNow;
+  if (!ui.canEdit) return;
+  $('#edit-boss').onclick = () => openBossEditor(boss);
+  $$('#offsets .chip').forEach((b) => b.onclick = () => {
+    const v = b.dataset.v;
+    ui.offset = v === 'custom' ? 'custom' : Number(v);
+    if (v === 'custom' && !ui.customAt) ui.customAt = toLocalInput(Date.now());
+    renderRecord();
+  });
+  $('#custom-at')?.addEventListener('change', (e) => { ui.customAt = e.target.value; });
+  $('#note').addEventListener('input', (e) => { ui.note = e.target.value; });
+  $$('[data-status]').forEach((b) => b.onclick = () => recordStatus(b.dataset.status));
+  $('#add-leave').onclick = () => openLeaveEditor(today);
+  $('#fix-missing')?.addEventListener('click', () => openEventEditor({ date: missing.date, preset: { status: 'off', time: '18:00' } }));
+}
+
+function eventList(day) {
+  return `<ul class="list">${day.events.map((e) => {
+    const s = R.STATUSES[e.status];
+    return `<li><span class="time">${R.fmtMin(R.minutesOf(e.at))}</span><span class="dot" style="background:${s.color}"></span>
+      <span>${s.emoji} ${s.label}${e.note ? `<span class="muted small">・${esc(e.note)}</span>` : ''}</span>
+      ${ui.canEdit ? `<span class="spacer"></span><button class="btn sm" data-edit="${esc(e.id)}">修改</button>` : ''}</li>`;
+  }).join('')}</ul>`;
+}
+function bindEventList(root) {
+  $$('[data-edit]', root).forEach((b) => b.onclick = () => {
+    const ev = DB.events.find((e) => e.id === b.dataset.edit);
+    openEventEditor({ date: R.dateKey(ev.at), ev });
+  });
+}
+
+// ---------- 紀錄編輯 ----------
+function openEventEditor({ date, ev, preset = {}, back }) {
+  const time = ev ? R.fmtMin(R.minutesOf(ev.at)) : (preset.time || R.fmtMin(nowMin()));
+  const status = ev?.status || preset.status || 'work';
+  openSheet(`
+    <h3>${ev ? '修改紀錄' : '補登紀錄'}・${fmtDate(date)}</h3>
+    <label class="f"><span>時間</span><input type="time" id="e-time" value="${time}"></label>
+    <label class="f"><span>狀態</span><select id="e-status">
+      ${Object.entries(R.STATUSES).map(([k, s]) => `<option value="${k}" ${k === status ? 'selected' : ''}>${s.emoji} ${s.label}</option>`).join('')}
+    </select></label>
+    <label class="f"><span>旁白</span><input type="text" id="e-note" value="${esc(ev?.note || '')}" maxlength="100"></label>
+    <div class="sheet-actions">
+      ${ev ? '<button class="btn danger" id="e-del">刪除</button>' : '<button class="btn" id="e-cancel">取消</button>'}
+      <button class="btn primary" id="e-save">儲存</button>
+    </div>
+  `, (el) => {
+    const after = () => { render(); back ? back() : closeSheet(); };
+    $('#e-save', el).onclick = async () => {
+      const at = msAt(date, $('#e-time', el).value);
+      if (!/^\d{2}:\d{2}$/.test($('#e-time', el).value) || !Number.isFinite(at)) { toast('請輸入時間'); return; }
+      if (at > Date.now() + 60000) { toast('時間不能在未來'); return; }
+      const patch = { at, status: $('#e-status', el).value, note: $('#e-note', el).value.trim() };
+      if (ev) await store.updateEvent(ev.id, patch); else await store.addEvent({ ...patch, boss: ui.bossId });
+      toast('已儲存');
+      after();
+    };
+    $('#e-del', el)?.addEventListener('click', async () => { await store.deleteEvent(ev.id); toast('已刪除'); after(); });
+    $('#e-cancel', el)?.addEventListener('click', () => (back ? back() : closeSheet()));
+  });
+}
+
+// ---------- 休假編輯 ----------
+function openLeaveEditor(date, back) {
+  openSheet(`
+    <h3>🏝️ 閉關登記（休假）</h3>
+    <label class="f"><span>日期（可以先登記未來的假）</span><input type="date" id="l-date" value="${date}"></label>
+    <label class="f"><span>時長</span><select id="l-kind">
+      ${Object.entries(R.LEAVE_KINDS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
+    </select></label>
+    <div class="row hidden" id="l-custom" style="margin-bottom:10px">
+      <label class="f" style="flex:1;margin:0"><span>從</span><input type="time" id="l-start" value="14:00"></label>
+      <label class="f" style="flex:1;margin:0"><span>到</span><input type="time" id="l-end" value="16:00"></label>
+    </div>
+    <label class="f"><span>假別</span><select id="l-type">${R.LEAVE_TYPES.map((t) => `<option>${t}</option>`).join('')}</select></label>
+    <label class="f"><span>旁白</span><input type="text" id="l-note" placeholder="例如：出國旅行" maxlength="100"></label>
+    <div class="muted small">上半場：13:00 前上線、18:00 可下線。下半場：上線 + 3 小時可下線。</div>
+    <div class="sheet-actions">
+      <button class="btn" id="l-cancel">取消</button>
+      <button class="btn primary" id="l-save">儲存</button>
+    </div>
+  `, (el) => {
+    $('#l-kind', el).onchange = (e) => $('#l-custom', el).classList.toggle('hidden', e.target.value !== 'custom');
+    $('#l-cancel', el).onclick = () => (back ? back() : closeSheet());
+    $('#l-save', el).onclick = async () => {
+      const lv = { boss: ui.bossId, date: $('#l-date', el).value, kind: $('#l-kind', el).value, type: $('#l-type', el).value, note: $('#l-note', el).value.trim() };
+      if (!lv.date) { toast('請選日期'); return; }
+      if (lv.kind === 'custom') {
+        lv.start = $('#l-start', el).value; lv.end = $('#l-end', el).value;
+        if (!lv.start || !lv.end || lv.start >= lv.end) { toast('結束時間要晚於開始時間'); return; }
+      }
+      if (bossLeaves().some((x) => R.leavesOverlap(x, lv))) { toast('這段時間已經有閉關了'); return; }
+      const saved = await store.addLeave(lv);
+      render();
+      openNotify({
+        title: `已登記閉關・${fmtDate(lv.date)}`,
+        text: R.renderTemplate(DB.settings.templates.leave, leaveVars(saved)),
+        undo: () => store.deleteLeave(saved.id),
+      });
+    };
+  });
+}
+
+// ---------- 月曆 ----------
+function monthDays(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const n = new Date(y, m, 0).getDate();
+  return Array.from({ length: n }, (_, i) => `${ym}-${R.pad(i + 1)}`);
+}
+function shiftMonth(ym, n) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${R.pad(d.getMonth() + 1)}`;
+}
+function monthNav() {
+  const [y, m] = ui.month.split('-');
+  return `<div class="month-nav">
+    <button class="btn sm" data-mn="-1">‹ 上個月</button>
+    <span class="title">WORLD ${Number(m)}・${y}</span>
+    <button class="btn sm" data-mn="1">下個月 ›</button></div>`;
+}
+function bindMonthNav(root, rerender) {
+  $$('[data-mn]', root).forEach((b) => b.onclick = () => {
+    ui.month = shiftMonth(ui.month, Number(b.dataset.mn));
+    ensureCalendar(Number(ui.month.slice(0, 4)));
+    rerender();
+  });
+}
+
+function dayCellText(d) {
+  if (d.remote) return '在家修煉';
+  if (d.state === 'leave') return d.leaves[0]?.type || '休假';
+  if (d.state === 'holiday') return d.reason && d.reason !== '假日' ? d.reason : '';
+  if (d.arrival != null) return R.fmtMin(d.arrival);
+  if (d.leaves.length) return d.leaves[0].type;
+  if (d.state === 'noRecord') return '無情報';
+  return '';
+}
+
+function renderCalendar() {
+  if (!currentBoss()) { noBossCard($('#view-calendar')); return; }
+  const days = monthDays(ui.month).map(evalDate);
+  const first = parseDate(days[0].date).getDay();
+  const today = todayKey();
+  const legendKeys = ['complete', 'remote', 'late', 'missingOff', 'leave', 'noRecord', 'extra'];
+  $('#view-calendar').innerHTML = `
+    <div class="card">
+      ${monthNav()}
+      <div class="cal">
+        ${WEEK.map((w) => `<div class="wd">${w}</div>`).join('')}
+        ${'<div></div>'.repeat(first)}
+        ${days.map((d) => {
+          const ds = R.displayState(d);
+          const c = R.DAY_STATES[ds];
+          const off = !d.workday && d.state !== 'extra';
+          return `<button class="d ${off ? 'off' : ''} ${d.date === today ? 'today' : ''}" data-day="${d.date}">
+            <span class="n">${Number(d.date.slice(8))}</span>
+            <span class="s num">${esc(dayCellText(d))}</span>
+            <span class="bar" style="background:${['future', 'pending', 'holiday'].includes(ds) ? 'transparent' : c.color}"></span>
+          </button>`;
+        }).join('')}
+      </div>
+      <div class="legend">${legendKeys.map((k) => `<span><i style="background:${R.DAY_STATES[k].color}"></i>${R.DAY_STATES[k].label}</span>`).join('')}</div>
+    </div>
+    <div class="muted small" style="text-align:center">點關卡查看細節、補登紀錄或閉關</div>
+  `;
+  bindMonthNav($('#view-calendar'), renderCalendar);
+  $$('[data-day]').forEach((b) => b.onclick = () => openDay(b.dataset.day));
+}
+
+function timelineHTML(d) {
+  const S = 7 * 60, E = 21 * 60;
+  const pct = (m) => `${((Math.min(Math.max(m, S), E) - S) / (E - S)) * 100}%`;
+  const w = (a, b) => `${((Math.min(Math.max(b, S), E) - Math.min(Math.max(a, S), E)) / (E - S)) * 100}%`;
+  const segs = d.segments.filter((s) => s.status !== 'off').map((s) => {
+    const end = s.end ?? Math.min(s.start + 20, E);
+    return `<div class="seg ${s.end == null ? 'open' : ''}" style="left:${pct(s.start)};width:${w(s.start, end)};background:${R.STATUSES[s.status].color}" title="${R.STATUSES[s.status].label}"></div>`;
+  }).join('');
+  const marks = [R.SCHEDULE.start, R.SCHEDULE.end, d.expectedLeave].filter((m) => m != null)
+    .map((m) => `<div class="mark" style="left:${pct(m)}"></div>`).join('');
+  return `<div class="timeline"><div class="lunchband" style="left:${pct(720)};width:${w(720, 780)}"></div>${segs}${marks}</div>
+    <div class="tl-scale">${[8, 10, 12, 14, 16, 18, 20].map((h) => `<span style="left:${pct(h * 60)}">${h}</span>`).join('')}</div>`;
+}
+
+function openDay(date) {
+  const d = evalDate(date);
+  const info = dayInfo(date);
+  const ov = DB.settings.overrides[date];
+  const stLabel = R.DAY_STATES[R.displayState(d)].label;
+  const fact = (k, v, bad) => `<div class="fact"><div class="k">${k}</div><div class="v ${bad ? 'bad' : ''}">${v}</div></div>`;
+  openSheet(`
+    <h3>${fmtDate(date, true)} <span class="muted small">${esc(stLabel)}${info.reason ? '・' + esc(info.reason) : ''}</span></h3>
+    ${d.events.length ? `
+      <div class="facts" style="margin-top:0">
+        ${fact('上線', R.fmtMin(d.arrival), d.lateMinutes > 0)}
+        ${fact('下線', d.departure != null ? R.fmtMin(d.departure) : '未見', d.earlyMinutes > 0)}
+        ${fact('可下線', R.fmtMin(d.expectedLeave))}
+        ${fact('上線時數', R.fmtDuration(d.workMinutes))}
+        ${fact('吃飯', R.fmtDuration(d.lunchMinutes))}
+        ${fact('離開王座', d.awayCount ? `${d.awayCount} 次` : '—')}
+        ${fact('睡眠補血', d.napCount ? R.fmtDuration(d.napMinutes) : '—')}
+      </div>
+      <div class="small" style="margin-top:8px">
+        ${[d.lateMinutes && `<span style="color:var(--danger)">晚上線 ${R.fmtDuration(d.lateMinutes)}</span>`,
+           d.earlyMinutes && `<span style="color:var(--danger)">早下線 ${R.fmtDuration(d.earlyMinutes)}</span>`,
+           d.overtimeMinutes && `加時賽 ${R.fmtDuration(d.overtimeMinutes)}`].filter(Boolean).join('　')}
+      </div>
+      <div style="margin-top:10px">${timelineHTML(d)}</div>` : ''}
+
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">冒險日誌</h2><span class="spacer"></span>${ui.canEdit ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}</div>
+      ${d.events.length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
+    </div>
+
+    <div class="card">
+      <div class="row"><h2 style="margin:0">閉關</h2><span class="spacer"></span>${ui.canEdit ? '<button class="btn sm" id="d-leave">＋ 登記</button>' : ''}</div>
+      ${d.leaves.length ? `<ul class="list">${d.leaves.map((l) => `<li><span>${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.note ? `<span class="muted small">・${esc(l.note)}</span>` : ''}</span>
+        ${ui.canEdit ? `<span class="spacer"></span><button class="btn sm danger" data-del-leave="${esc(l.id)}">刪除</button>` : ''}</li>`).join('')}</ul>` : '<div class="muted small" style="margin-top:8px">沒有閉關</div>'}
+    </div>
+
+    <div class="row wrap-row small">
+      <span class="muted">這天是${info.workday ? '冒險日' : '休戰日'}${ov ? '（手動設定）' : ''}</span><span class="spacer"></span>
+      ${!ui.canEdit ? '' : ov ? '<button class="btn sm" id="d-ov-clear">恢復預設</button>' : `<button class="btn sm" id="d-ov">改成${info.workday ? '休戰日' : '冒險日'}</button>`}
+    </div>
+    <div class="sheet-actions" style="grid-template-columns:1fr"><button class="btn" id="d-close">關閉</button></div>
+  `, (el) => {
+    const back = () => openDay(date);
+    $('#d-close', el).onclick = closeSheet;
+    if (!ui.canEdit) return;
+    $('#d-add', el).onclick = () => openEventEditor({ date, back, preset: d.events.length ? { status: 'off', time: R.fmtMin(R.SCHEDULE.end) } : { status: 'work', time: '09:00' } });
+    $('#d-leave', el).onclick = () => openLeaveEditor(date, back);
+    $$('[data-edit]', el).forEach((b) => b.onclick = () => openEventEditor({ date, ev: DB.events.find((e) => e.id === b.dataset.edit), back }));
+    $$('[data-del-leave]', el).forEach((b) => b.onclick = async () => { await store.deleteLeave(b.dataset.delLeave); render(); back(); });
+    $('#d-ov', el)?.addEventListener('click', async () => { await store.setOverride(date, info.workday ? 'holiday' : 'workday'); render(); back(); });
+    $('#d-ov-clear', el)?.addEventListener('click', async () => { await store.setOverride(date, null); render(); back(); });
+  });
+}
+
+// ---------- 統計 ----------
+function renderStats() {
+  if (!currentBoss()) { noBossCard($('#view-stats')); return; }
+  const days = monthDays(ui.month).map(evalDate);
+  const s = R.summarize(days);
+  const observable = s.observableDays;
+  const pct = (n) => (observable ? (n / observable) * 100 : 0);
+  const tile = (k, v, d = '', wide = false) => `<div class="tile ${wide ? 'wide' : ''}"><div class="k">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
+  const hrs = (m) => `${Math.round((m / 60) * 10) / 10}<small>小時</small>`;
+  const leaveText = Object.entries(s.leaveByType).map(([t, n]) => `${t} ${n} 天`).join('、');
+
+  $('#view-stats').innerHTML = `
+    <div class="card">${monthNav()}
+      <div class="small">情報完整度：<b>${s.completeDays}</b> / ${observable} 天
+        <span class="muted">（冒險日 ${s.workdays} 天，扣掉閉關 ${s.fullLeaveDays} 天${s.todayDays ? '、今天' : ''}）</span></div>
+      <div class="meter">
+        <div style="width:${pct(s.completeDays)}%;background:${R.DAY_STATES.complete.color}"></div>
+        <div style="width:${pct(s.missingOffDays)}%;background:${R.DAY_STATES.missingOff.color}"></div>
+        <div style="width:${pct(s.noRecordDays)}%;background:${R.DAY_STATES.noRecord.color}"></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:${R.DAY_STATES.complete.color}"></i>通關 ${s.completeDays}</span>
+        <span><i style="background:${R.DAY_STATES.missingOff.color}"></i>未見下線 ${s.missingOffDays}</span>
+        <span><i style="background:${R.DAY_STATES.noRecord.color}"></i>無情報 ${s.noRecordDays}</span>
+      </div>
+    </div>
+
+    ${arrivalChart(days, s)}
+
+    <div class="tiles">
+      ${tile('晚上線', `${s.lateCount}<small>次</small>`, s.lateCount ? `共 ${R.fmtDuration(s.lateMinutes)}` : '')}
+      ${tile('早下線', `${s.earlyCount}<small>次</small>`, s.earlyCount ? `共 ${R.fmtDuration(s.earlyMinutes)}` : '只算有看到下線的天數')}
+      ${tile('平均上線', R.fmtMin(s.avgArrival))}
+      ${tile('平均下線', R.fmtMin(s.avgDeparture))}
+      ${tile('上線時數', hrs(s.workMinutes), `目標 ${Math.round(s.requiredMinutes / 6) / 10} 小時（${s.completeDays} 個通關日）${s.requiredMinutes ? `・達成 ${Math.round((s.workMinutes / s.requiredMinutes) * 100)}%` : ''}`, true)}
+      ${tile('離開王座', `${s.awayCount}<small>次</small>`, s.awayCount ? `共 ${R.fmtDuration(s.awayMinutes)}` : '')}
+      ${tile('睡眠補血', `${s.napCount}<small>次</small>`, s.napCount ? `共 ${R.fmtDuration(s.napMinutes)}` : '')}
+      ${s.remoteDays ? tile('在家修煉', `${s.remoteDays}<small>天</small>`, '照班表計算，不列入上線時刻') : ''}
+      ${tile('加時賽', `${s.overtimeCount}<small>次</small>`, s.overtimeCount ? `共 ${R.fmtDuration(s.overtimeMinutes)}` : '')}
+      ${tile('閉關', `${s.leaveDays}<small>天</small>`, esc(leaveText))}
+      ${s.extraDays ? tile('假日上線', `${s.extraDays}<small>天</small>`) : ''}
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>匯出情報</h2>
+      <button class="btn block" id="csv">下載本月冒險紀錄（CSV，可用 Excel 開）</button>
+    </div>
+  `;
+  bindMonthNav($('#view-stats'), renderStats);
+  $('#csv').onclick = () => downloadCSV(days);
+}
+
+// 每日上線時刻：一天一行，點的位置 = 幾點上線；09:00 金色線、08:30 虛線
+function arrivalChart(days, s) {
+  const rows = days.filter((d) => d.workday && !['future', 'pending'].includes(d.state));
+  const arrs = rows.filter((d) => d.arrival != null && !d.remote).map((d) => d.arrival);
+  if (!rows.length) return '';
+  const lo = Math.min(8 * 60, Math.floor(Math.min(...arrs, 540) / 30) * 30);
+  const hi = Math.max(10 * 60, Math.ceil(Math.max(...arrs, 540) / 30) * 30);
+  const x = (m) => `${((m - lo) / (hi - lo)) * 100}%`;
+  const ticks = [];
+  for (let m = lo; m <= hi; m += 30) ticks.push(m);
+  const refs = `<span class="ref" style="left:${x(R.SCHEDULE.flexStart)}"></span><span class="ref main" style="left:${x(R.SCHEDULE.start)}"></span>`;
+  const body = rows.map((d) => {
+    const late = d.lateMinutes > 0;
+    const shown = d.arrival != null && !d.remote; // 在家修煉不畫點，只標文字
+    const tip = d.remote ? `${fmtDate(d.date)} 在家修煉（照班表）` : d.arrival != null ? `${fmtDate(d.date)} ${R.fmtMin(d.arrival)} 上線${late ? `・晚上線 ${R.fmtDuration(d.lateMinutes)}` : ''}` : `${fmtDate(d.date)} ${R.DAY_STATES[d.state].label}`;
+    const track = shown
+      ? `${refs}<span class="pt ${late ? 'late' : ''}" style="left:${x(d.arrival)}"></span>`
+      : `${refs}<span class="none">${esc(d.remote ? '🏠 在家修煉' : d.state === 'leave' ? '閉關' : R.DAY_STATES[d.state].label)}</span>`;
+    return `<div class="row-hit" title="${esc(tip)}"><span class="lbl">${fmtDate(d.date)}</span><div class="track">${track}</div>
+      <span class="val">${shown ? `${late ? '⚠ ' : ''}${R.fmtMin(d.arrival)}` : '<span class="muted">—</span>'}</span></div>`;
+  }).join('');
+  const axis = `<span></span><div class="axis">${ticks.map((m) => `<span style="left:${x(m)}">${R.fmtMin(m)}</span>`).join('')}</div><span></span>`;
+  const sum = s.earliestArrival ? `<div class="arr-sum">
+      <span>最早 <b>${R.fmtMin(s.earliestArrival.minutes)}</b>（${fmtDate(s.earliestArrival.date)}）</span>
+      <span>最晚 <b>${R.fmtMin(s.latestArrival.minutes)}</b>（${fmtDate(s.latestArrival.date)}）</span>
+      <span>平均 <b>${R.fmtMin(s.avgArrival)}</b></span></div>` : '';
+  return `<div class="card"><h2>每日上線時刻</h2>
+    <div class="arr">${axis}${body}</div>
+    <div class="legend"><span><i style="background:var(--green)"></i>準時</span><span><i style="background:var(--red)"></i>⚠ 晚上線</span>
+      <span><i style="background:var(--gold);height:2px;vertical-align:3px"></i>09:00</span><span><i style="background:var(--slate);height:2px;vertical-align:3px"></i>08:30 彈性</span></div>
+    ${sum}</div>`;
+}
+
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function downloadCSV(days) {
+  const head = ['日期', '星期', '日別', '狀態', '上線', '下線', '可下線', '遲到(分)', '早退(分)', '加時(分)', '上線時數(分)', '吃飯(分)', '離開王座(次)', '離開王座(分)', '睡眠補血(分)', '閉關', '紀錄明細'];
+  // 以 = + - @ 開頭的內容加上 ' 避免 Excel 當成公式執行
+  const q = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; };
+  const rows = days.filter((d) => d.state !== 'future').map((d) => [
+    d.date, WEEK[parseDate(d.date).getDay()], d.workday ? '冒險日' : `休戰日${d.reason ? '・' + d.reason : ''}`,
+    R.displayState(d) === 'late' ? '失誤（遲到／早退）' : R.DAY_STATES[R.displayState(d)].label,
+    d.arrival != null ? R.fmtMin(d.arrival) : '', d.departure != null ? R.fmtMin(d.departure) : '',
+    d.expectedLeave != null ? R.fmtMin(d.expectedLeave) : '',
+    d.lateMinutes, d.earlyMinutes, d.overtimeMinutes, d.workMinutes, d.lunchMinutes, d.awayCount, d.awayMinutes, d.napMinutes,
+    d.leaves.map((l) => `${l.type}・${R.leaveSpanText(l, '-')}`).join('；'),
+    d.events.map((e) => `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status].label}${e.note ? `(${e.note})` : ''}`).join('；'),
+  ].map(q).join(','));
+  download(`魔王出沒_${bossName()}_${ui.month}.csv`, '﻿' + [head.map(q).join(','), ...rows].join('\r\n'), 'text/csv;charset=utf-8');
+}
+
+// ---------- 設定 ----------
+function renderSettings() {
+  const tplKeys = [...Object.keys(R.STATUSES), 'leave'];
+  const labelOf = (k) => (k === 'leave' ? '🏝️ 閉關' : `${R.STATUSES[k].emoji} ${R.STATUSES[k].label}`);
+  const years = Object.keys(ui.calStatus).sort();
+  const overrides = Object.entries(DB.settings.overrides).sort();
+  const legacy = ui.canEdit && currentBoss() ? store.legacyCount() : 0;
+  const E = ui.canEdit;
+  $('#view-settings').innerHTML = `
+    <div class="card">
+      <h2>帳號</h2>
+      ${ui.user
+        ? `<div class="row"><span class="small">${esc(account.email)}${ui.isEditor ? '' : '<br><span class="muted">這個帳號沒有編輯權限</span>'}</span><span class="spacer"></span>
+            ${ui.isEditor ? `<button class="btn sm" id="toggle-view">${E ? '👀 切到觀戰' : '✏️ 切回 GM'}</button>` : ''}<button class="btn sm" id="logout">登出</button></div>
+          ${ui.isEditor && !E ? '<div class="small muted" style="margin-top:8px">目前是觀戰模式，編輯按鈕都已隱藏，避免誤觸</div>' : ''}`
+        : `<div class="row"><span class="small muted">目前是觀戰模式，只能看不能改</span><span class="spacer"></span><button class="btn sm primary" id="login">🔑 登入</button></div>`}
+    </div>
+
+    ${E ? `<div class="card">
+      <h2>魔王名單</h2>
+      ${DB.bosses.length ? `<ul class="list">${DB.bosses.map((b) => `<li><span><span class="lv" style="margin:0 6px 0 0">Lv.${b.level}</span>${esc(b.name)}${b.note ? `<span class="muted small">・${esc(b.note.split('\n')[0])}</span>` : ''}</span>
+        <span class="spacer"></span><button class="btn sm" data-boss-edit="${esc(b.id)}">編輯</button></li>`).join('')}</ul>` : '<div class="muted small">還沒有魔王</div>'}
+      <button class="btn sm" id="boss-add2" style="margin-top:10px">＋ 新增魔王</button>
+    </div>
+
+    <div class="card">
+      <h2>廣播訊息範本</h2>
+      <div class="small muted" style="margin-bottom:10px">可用變數（輸入大括號）：${R.TEMPLATE_VARS.map((v) => `<span class="var-chip">{${v}}</span>`).join('')}</div>
+      ${tplKeys.map((k) => `
+        <label class="f"><span class="row">${labelOf(k)}<span class="spacer"></span><button class="linkbtn" data-reset="${k}">還原預設</button></span>
+          <textarea data-tpl="${k}" rows="3" style="min-height:72px">${esc(DB.settings.templates[k])}</textarea></label>`).join('')}
+    </div>` : ''}
+
+    <div class="card">
+      <h2>休戰日（國定假日）</h2>
+      <div class="small">自動下載台灣政府行事曆（含補假、補班）。</div>
+      <ul class="list small">${years.map((y) => `<li>${y} 年<span class="spacer"></span>${ui.calStatus[y].loading ? '下載中…' : ui.calStatus[y].ok ? '✅ 已載入' : `⚠️ 下載失敗，先以週末判斷`}</li>`).join('')}</ul>
+      <button class="btn sm" id="cal-refresh">重新下載</button>
+      ${overrides.length ? `<h2 style="margin-top:14px">手動調整</h2><ul class="list small">${overrides.map(([d, v]) =>
+        `<li>${fmtDate(d, true)}：${v === 'holiday' ? '休戰日' : '冒險日'}${E ? `<span class="spacer"></span><button class="btn sm" data-ov-del="${esc(d)}">移除</button>` : ''}</li>`).join('')}</ul>` : ''}
+      ${E ? '<div class="small muted" style="margin-top:8px">要把某天改成休戰日或冒險日（例如公司特別放假），到地圖點那一天即可。</div>' : ''}
+    </div>
+
+    ${E ? `<div class="card">
+      <h2>存檔</h2>
+      <div class="small muted" style="margin-bottom:10px">存檔在雲端（${DB.events.length} 筆日誌、${DB.leaves.length} 筆閉關），所有人打開網站看到的都是這份。「讀取存檔」會取代雲端上的全部資料，讀取前請先下載目前的存檔備份。</div>
+      ${legacy ? `<div class="banner" style="box-shadow:none;margin-bottom:12px"><span class="small">這台裝置還有接雲端前的舊存檔（${legacy} 筆），上傳後歸給 ${esc(bossName())}</span><span class="spacer"></span><button class="btn sm" id="bk-legacy">⬆️ 上傳</button></div>` : ''}
+      <div class="row wrap-row">
+        <button class="btn sm" id="bk-export">💾 下載存檔</button>
+        <label class="btn sm">📂 讀取存檔<input type="file" id="bk-import" accept="application/json" hidden></label>
+        <span class="spacer"></span>
+        <button class="btn sm danger" id="bk-clear">🗑️ 刪除存檔</button>
+      </div>
+    </div>` : ''}
+    <div class="card">
+      <h2>外觀（電腦版）</h2>
+      <div class="chips" id="skins">
+        ${SKINS.map(([k, label]) => `<button class="chip" data-skin="${k}" aria-pressed="${document.documentElement.dataset.skin === k}">${label}</button>`).join('')}
+      </div>
+      <div class="small muted" style="margin-top:8px">手機一律是滿版畫面，不受影響。</div>
+    </div>
+    <div class="muted small" style="text-align:center">遊戲規則：09:00 開服・18:00 關服・12:00–13:00 休息・可提早 30 分鐘上線<br>v${VERSION}</div>
+  `;
+  const root = $('#view-settings');
+  $('#cal-refresh').onclick = refreshCalendar;
+  $$('#skins [data-skin]').forEach((b) => b.onclick = () => setSkin(b.dataset.skin));
+  $('#login')?.addEventListener('click', openLogin);
+  $('#logout')?.addEventListener('click', () => account.logout());
+  $('#toggle-view')?.addEventListener('click', toggleViewOnly);
+  if (!E) return;
+  $$('[data-boss-edit]', root).forEach((b) => b.onclick = () => openBossEditor(DB.bosses.find((x) => x.id === b.dataset.bossEdit)));
+  $('#boss-add2').onclick = () => openBossEditor();
+  $$('[data-tpl]', root).forEach((t) => t.addEventListener('change', async () => { await store.setTemplate(t.dataset.tpl, t.value); toast('範本已儲存'); }));
+  $$('[data-reset]', root).forEach((b) => b.onclick = async (e) => { e.preventDefault(); await store.resetTemplate(b.dataset.reset); renderSettings(); toast('已還原'); });
+  $$('[data-ov-del]', root).forEach((b) => b.onclick = async () => { await store.setOverride(b.dataset.ovDel, null); renderSettings(); });
+  $('#bk-legacy')?.addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    try { const n = await store.uploadLegacy(ui.bossId); toast(`已上傳 ${n} 筆`); } catch (err) { toast('上傳失敗：' + (err.code || err.message)); }
+    renderSettings();
+  });
+  $('#bk-export').onclick = async () => download(`魔王紀錄備份_${todayKey()}.json`, await store.exportJSON(), 'application/json');
+  $('#bk-import').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try { const r = await store.importJSON(await f.text()); toast(r.skipped ? `讀取完成，略過 ${r.skipped} 筆格式不正確的資料` : '讀取完成'); render(); }
+    catch (err) { toast('讀取失敗：' + (err.code || err.message)); }
+  };
+  $('#bk-clear').onclick = (e) => {
+    const b = e.currentTarget;
+    if (b.dataset.armed) { store.clearAll().then(() => { toast('已刪除'); render(); }, (err) => toast('刪除失敗：' + (err.code || err.message))); return; }
+    b.dataset.armed = '1';
+    b.textContent = '再按一次確定刪除';
+    setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '🗑️ 刪除存檔'; } }, 4000);
+  };
+}
+
+async function refreshCalendar() {
+  const years = Object.keys(ui.calStatus).sort();
+  for (const y of years) ui.calStatus[y] = { loading: true };
+  renderSettings();
+  for (const y of years) {
+    const r = await loadCalendar(Number(y), { force: true });
+    ui.calStatus[y] = { ok: r.ok, error: r.error };
+    Object.assign(ui.calendar, r.data);
+  }
+  renderSettings();
+}
+
+// ---------- 外觀（電腦版的機種）----------
+const SKINS = [['boy', '🎮 直式掌機'], ['wide', '🕹️ 橫式掌機'], ['none', '🖥️ 無外殼']];
+function setSkin(skin) {
+  document.documentElement.dataset.skin = skin;
+  storage.set('maou-log:skin', skin);
+  renderSettings();
+}
+
+// ---------- 登入 ----------
+const AUTH_ERRORS = {
+  'auth/invalid-credential': '帳號或密碼錯誤',
+  'auth/wrong-password': '帳號或密碼錯誤',
+  'auth/user-not-found': '帳號或密碼錯誤',
+  'auth/invalid-email': 'Email 格式不正確',
+  'auth/missing-password': '請輸入密碼',
+  'auth/too-many-requests': '嘗試太多次，請稍後再試',
+  'auth/network-request-failed': '連不上網路',
+  'auth/operation-not-allowed': '尚未開啟 Email 登入',
+};
+const authMessage = (err) => AUTH_ERRORS[err.code] || `登入失敗（${err.code || err.message}）`;
+
+function openLogin() {
+  openSheet(`
+    <h3>▶ PRESS START</h3>
+    <form id="login-form">
+      <label class="f"><span>Email</span><input type="text" id="lg-email" inputmode="email" autocomplete="username" autocapitalize="off"></label>
+      <label class="f"><span>密碼</span><input type="password" id="lg-pass" autocomplete="current-password"></label>
+      <div class="login-err" id="lg-err"></div>
+      <div class="sheet-actions" style="margin-top:0">
+        <button type="button" class="btn" id="lg-cancel">取消</button>
+        <button type="submit" class="btn primary">登入</button>
+      </div>
+      <div style="text-align:center;margin-top:10px"><button type="button" class="linkbtn" id="lg-reset">忘記密碼</button></div>
+    </form>`);
+  const val = () => [$('#lg-email').value.trim(), $('#lg-pass').value];
+  const err = (m) => { $('#lg-err').textContent = m; };
+  const busy = (on) => $$('#login-form button').forEach((b) => { b.disabled = on; });
+  const run = async (fn) => { err(''); busy(true); try { await fn(); } catch (e) { err(authMessage(e)); } busy(false); };
+  $('#login-form').onsubmit = (e) => { e.preventDefault(); run(() => account.login(...val())); };
+  $('#lg-cancel').onclick = closeSheet;
+  $('#lg-reset').onclick = () => {
+    const [email] = val();
+    if (!email) { err('請先輸入 Email'); return; }
+    run(async () => { await account.resetPassword(email); err('已寄出重設密碼信，請收信'); });
+  };
+}
+
+// ---------- 啟動 ----------
+const y = Number(todayKey().slice(0, 4)); // 台灣時間的年份
+drawSprite();
+// 預先載入今年與明年的休戰日（跨年時明年資料已就緒）
+ensureCalendar(y);
+ensureCalendar(y + 1);
+
+const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+store.onChange(() => { if (!typing()) render(); });
+store.onError((err, kind) => toast(`${kind === 'read' ? '雲端同步失敗' : '雲端存檔失敗'}：${err.code || err.message}`));
+// 編輯者可以切到觀戰模式（隱藏所有編輯按鈕），避免誤觸
+function toggleViewOnly() {
+  ui.viewOnly = !ui.viewOnly;
+  storage.set('maou-log:view-only', ui.viewOnly ? '1' : '0');
+  ui.canEdit = ui.isEditor && !ui.viewOnly;
+  if (sheet.open) closeSheet();
+  toast(ui.canEdit ? '✏️ GM 模式：可以記錄與修改' : '👀 觀戰模式：只看不改');
+  render();
+}
+
+account.onUser((user, isEditor) => {
+  ui.user = user;
+  ui.isEditor = isEditor;
+  ui.canEdit = isEditor && !ui.viewOnly;
+  if (sheet.open) closeSheet();
+  if (user && !isEditor) toast('這個帳號沒有編輯權限，目前是觀戰模式');
+  render();
+});
+watchOnline((n) => {
+  ui.online = n;
+  const el = $('#online');
+  if (el && n != null) el.textContent = `🟢 在線 ${n}`;
+  else render();
+});
+store.ready.then(() => {
+  document.body.classList.add('ready');
+  render();
+});
+setInterval(() => { if (!sheet.open && !typing()) render(); }, 30000);
+</script>
+</body>
+</html>
