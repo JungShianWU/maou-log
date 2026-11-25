@@ -531,7 +531,6 @@ function fmtDate(k, withYear = false) {
   const d = parseDate(k);
   return `${withYear ? d.getFullYear() + '/' : ''}${d.getMonth() + 1}/${d.getDate()}（${WEEK[d.getDay()]}）`;
 }
-const addDays = R.addDays;
 const msAt = R.taipeiMs;
 function toLocalInput(ms) { return `${R.dateKey(ms)}T${R.fmtMin(R.minutesOf(ms))}`; }
 
@@ -991,15 +990,6 @@ async function recordStatus(status, { now = false } = {}) {
   });
 }
 
-function findMissingOff() {
-  for (let i = 1; i <= 7; i++) {
-    const k = addDays(todayKey(), -i);
-    const d = evalDate(k);
-    if (d.state === 'missingOff') return d;
-  }
-  return null;
-}
-
 function renderRecord() {
   const today = todayKey();
   const day = evalDate(today);
@@ -1009,7 +999,6 @@ function renderRecord() {
   const offNow = cur?.status === 'off'; // 下線多久照實際時間算，不受 19:00 影響
   const since = !cur ? 0 : offNow ? Math.max(0, nowMin() - R.minutesOf(cur.at)) : R.observedSince(R.minutesOf(cur.at), nowMin());
   const stopped = !!cur && !offNow && nowMin() > R.SCHEDULE.observeEnd && R.minutesOf(cur.at) < R.SCHEDULE.observeEnd; // 19:00 後沒人觀察，計時停在 19:00
-  const missing = findMissingOff();
   const info = dayInfo(today);
   const exp = Math.min(100, (day.workMinutes / (day.requiredMinutes || R.SCHEDULE.dailyMinutes)) * 100);
   const todayLeave = day.leaves.length
@@ -1024,8 +1013,6 @@ function renderRecord() {
 
   $('#view-record').innerHTML = `
     ${goneNote}
-    ${missing && canWrite() ? `<div class="banner"><span>⚠️ ${fmtDate(missing.date)} 沒看到 ${esc(bossName())} 下線</span><span class="spacer"></span>
-      <button class="btn sm" id="fix-missing">補登</button></div>` : ''}
 
     <div class="card">
       <div class="now">
@@ -1108,7 +1095,6 @@ function renderRecord() {
   $('#note').addEventListener('input', (e) => { ui.note = e.target.value; });
   $$('[data-status]').forEach((b) => b.onclick = () => recordStatus(b.dataset.status));
   $('#add-leave').onclick = () => openLeaveEditor(today);
-  $('#fix-missing')?.addEventListener('click', () => openEventEditor({ date: missing.date, preset: { status: 'off', time: '18:00' } }));
 }
 
 function eventList(day) {

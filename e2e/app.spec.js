@@ -948,6 +948,19 @@ test('休戰日在家修煉不鎖記錄：補登仍可選所有狀態；只有�
   await expect(page.locator('#e-status')).toHaveValue('work');
 });
 
+test('前幾天沒看到下線：冒險頁不提醒補登，地圖仍標「未見下線」', async ({ page, request }) => {
+  await put(request, 'boards/main/events/mo1', { boss: 'b30', at: new Date('2026-11-23T09:00:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await expect(page.locator('#view-record .now')).toBeVisible();
+  await expect(page.locator('#view-record')).not.toContainText('沒看到');
+  await expect(page.locator('#fix-missing')).toHaveCount(0);
+  await tab(page, 'calendar');
+  await page.locator('[data-day="2026-11-23"]').click();
+  await expect(page.locator('#sheet')).toContainText('未見下線');
+});
+
 test('每日上線時刻：範圍大時刻度對齊整點，頭尾都有刻度', async ({ page, request }) => {
   await put(request, 'boards/main/events/x1', { boss: 'b30', at: new Date('2026-11-23T07:40:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
   await put(request, 'boards/main/events/x2', { boss: 'b30', at: new Date('2026-11-20T10:50:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
