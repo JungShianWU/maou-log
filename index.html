@@ -76,12 +76,14 @@
   /* 目前狀態（對話框） */
   .now { display: flex; gap: 14px; align-items: center; }
   .now .emoji { font-size: 38px; width: 68px; height: 68px; display: grid; place-items: center; background: var(--night); border: 3px solid var(--c, var(--white)); flex: none; animation: bob 1.2s steps(2) infinite; }
-  .now .label { font-size: 24px; color: var(--white); }
+  .now .label { font-size: 24px; color: var(--white); line-height: 1.3; }
+  .now .label .who, .now .label .state { white-space: nowrap; }
   .now .label b { color: var(--gold); font-weight: 400; }
-  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
   .fact { background: var(--night); border: 2px solid var(--slate); padding: 6px 8px; }
   .fact .k { font-size: 13px; color: var(--sub); }
-  .fact .v { font-size: 17px; font-weight: 600; color: var(--white); font-variant-numeric: tabular-nums; }
+  .fact .v { font-size: 17px; font-weight: 600; color: var(--white); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fact .v .sub { display: block; font-size: 12px; font-weight: 400; color: var(--sub); white-space: normal; }
   .fact .v.bad { color: var(--danger); }
   .bar-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); margin-top: 12px; }
   .hp { height: 14px; background: var(--night); border: 2px solid var(--white); padding: 2px; display: flex; }
@@ -159,8 +161,15 @@
   .list li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 2px dotted var(--slate); }
   .list li:last-child { border-bottom: 0; }
   .list .time { font-variant-numeric: tabular-nums; color: var(--cyan); width: 48px; flex: none; }
+  .list .body { flex: 1; min-width: 0; }
+  .list .main { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* 太長就截斷，不撐破版面 */
+  .list .meta { display: block; font-size: 12px; color: var(--sub); line-height: 1.5; }
+  .list .meta:empty { display: none; }
+  .list .meta .note { color: var(--mist); margin-right: 6px; }
+  .list .meta .reporter, .list .meta .logged { margin-left: 0; }
+  .list .meta > :is(.note, .reporter) + :is(.reporter, .logged)::before { content: '・'; }
   .dot { width: 10px; height: 10px; flex: none; }
-  .logged, .reporter { font-size: 11px; color: var(--slate); margin-left: 2px; white-space: nowrap; }
+  .logged, .reporter { font-size: 11px; color: var(--slate); margin-left: 6px; white-space: nowrap; }
   .gone { opacity: .45; }
   .hist-btn { background: none; border: 1px dashed var(--slate); color: var(--cyan); font-size: 11px; padding: 0 5px; margin-left: 6px; cursor: pointer; text-decoration: none; }
   .hist { list-style: none; margin: 6px 0 0; padding: 6px 8px; background: var(--night); border-left: 3px solid var(--cyan); font-size: 12px; color: var(--mist); text-decoration: none; }
@@ -263,7 +272,16 @@
   @media (max-width: 480px) {
     header.top { flex-wrap: wrap; row-gap: 4px; }
     header.top h1 { font-size: 20px; white-space: nowrap; }
+    .now .label { font-size: 20px; }
+    .now .label .state { display: block; }
+    .fact { padding: 6px; }
     .fact .v { font-size: 15px; }
+    .month-nav .lbl { display: none; }
+    .month-nav .title { font-size: 17px; white-space: nowrap; }
+    .arr { grid-template-columns: 62px 1fr 50px; column-gap: 6px; }
+    .arr .lbl { font-size: 11px; }
+    .arr .val { font-size: 12px; }
+    .card { padding: 14px 12px; }
   }
   @media (max-width: 380px) { .status-grid { grid-template-columns: repeat(3, 1fr); } }
 
@@ -506,7 +524,8 @@ function openRumors() {
     <h3>🗣️ 傳聞一覽・${esc(bossName())}</h3>
     <div class="small muted" style="margin-bottom:8px">其他觀察者說的話，共 ${list.length} 則（新的在上面）</div>
     <ul class="list">${list.map((e) => `<li style="align-items:flex-start"><span class="time" style="width:auto;white-space:nowrap">${fmtDate(R.dateKey(e.at))}<br>${R.fmtMin(R.minutesOf(e.at))}</span>
-      <span>${esc(e.note)}${reporterHTML(e)}${historyHTML(e, 'event')}</span></li>`).join('')}</ul>
+      <span class="body"><span class="main" style="white-space:normal">${esc(e.note)}</span>
+        <span class="meta">${reporterHTML(e)}${historyHTML(e, 'event')}</span></span></li>`).join('')}</ul>
     <div class="sheet-actions" style="grid-template-columns:1fr"><button class="btn" id="rumor-close">關閉</button></div>
   `, (el) => { $('#rumor-close', el).onclick = closeSheet; });
 }
@@ -554,7 +573,7 @@ document.addEventListener('click', (e) => {
   const box = btn.nextElementSibling;
   box.hidden = !box.hidden;
 });
-const reporterHTML = (x) => { const t = reporterText(x); return t ? `<span class="reporter">・情報：${esc(t)}</span>` : ''; };
+const reporterHTML = (x) => { const t = reporterText(x); return t ? `<span class="reporter">情報：${esc(t)}</span>` : ''; };
 
 // 不自動挑魔王，沒選就看不到資料。選的魔王暫時不在清單裡（例如本機快取還沒有新魔王）時保留選擇，
 // 等資料同步到了就會顯示；真的被刪掉的魔王會顯示「請先選擇」。
@@ -785,7 +804,7 @@ function loggedText(x, occurredAt) {
   const d = R.dateKey(x.loggedAt);
   return `記錄於 ${d === R.dateKey(occurredAt) ? '' : fmtDate(d) + ' '}${R.fmtMin(R.minutesOf(x.loggedAt))}`;
 }
-const loggedHTML = (x, occurredAt) => { const t = loggedText(x, occurredAt); return t ? `<span class="logged">・${t}</span>` : ''; };
+const loggedHTML = (x, occurredAt) => { const t = loggedText(x, occurredAt); return t ? `<span class="logged">${t}</span>` : ''; };
 
 function lateText(day) { return day.lateMinutes > 0 ? `（晚上線 ${R.fmtDuration(day.lateMinutes)}）` : ''; }
 
@@ -929,7 +948,7 @@ function renderRecord() {
       <div class="now">
         <div class="emoji" style="--c:${st ? st.color : 'var(--white)'}">${st ? st.emoji : (day.state === 'leave' ? '🏝️' : '❔')}</div>
         <div>
-          <div class="label">${who} ${st ? `<b>${st.label}</b>` : (day.state === 'leave' ? '<b>閉關中</b>' : '尚未上線<span class="blink">_</span>')}</div>
+          <div class="label"><span class="who">${who}</span> <span class="state">${st ? `<b>${st.label}</b>` : (day.state === 'leave' ? '<b>閉關中</b>' : '尚未上線<span class="blink">_</span>')}</span></div>
           <div class="muted small num">${cur ? `從 ${R.fmtMin(R.minutesOf(cur.at))} 開始・已 ${R.fmtDuration(since)}` : (info.workday ? '冒險日' : `休戰日${info.reason ? '・' + esc(info.reason) : ''}`)}
             ${todayLeave ? `<br>閉關：${esc(todayLeave)}` : ''}</div>
         </div>
@@ -938,8 +957,8 @@ function renderRecord() {
       ${day.arrival != null && !day.remote ? `
       <div class="facts">
         <div class="fact"><div class="k">最早遇見</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
-        <div class="fact"><div class="k">最後遇見</div><div class="v">${cur ? `${R.fmtMin(R.minutesOf(cur.at))}<span class="small muted" style="font-weight:400">（${st.label}）</span>` : '—'}</div></div>
-        <div class="fact"><div class="k">觀察時數</div><div class="v">${R.fmtDuration(day.workMinutes)}</div></div>
+        <div class="fact"><div class="k">最後遇見</div><div class="v">${cur ? `${R.fmtMin(R.minutesOf(cur.at))}<span class="sub">（${st.label}）</span>` : '—'}</div></div>
+        <div class="fact"><div class="k">觀察時數</div><div class="v">${R.fmtDurationShort(day.workMinutes)}</div></div>
       </div>
       <div class="bar-label"><span>EXP</span><span class="num">${Math.round(exp)}%</span></div>
       <div class="hp"><div style="width:${exp}%"></div></div>
@@ -1013,12 +1032,14 @@ function eventList(day) {
   const list = [...day.events, ...hiddenEvents(day.date)].sort((a, b) => a.at - b.at);
   // 閉關排在最前面（沒有發生時刻）
   const leaves = [...day.leaves, ...hiddenLeaves(day.date)].map((l) => `<li class="${l.deleted ? 'gone' : ''}"><span class="time">閉關</span><span class="dot" style="background:${R.DAY_STATES.leave.color}"></span>
-      <span>🏝️ ${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.note ? `<span class="muted small">・${esc(l.note)}</span>` : ''}${reporterHTML(l)}${loggedHTML(l, R.taipeiMs(l.date, '09:00'))}${l.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(l, 'leave')}</span>
+      <span class="body"><span class="main">🏝️ ${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}</span>
+        <span class="meta">${l.note ? `<span class="note">${esc(l.note)}</span>` : ''}${reporterHTML(l)}${loggedHTML(l, R.taipeiMs(l.date, '09:00'))}${historyHTML(l, 'leave')}</span></span>
       ${canWrite() && !l.deleted ? `<span class="spacer"></span><button class="btn sm" data-edit-leave="${esc(l.id)}">修改</button>` : ''}</li>`).join('');
   return `<ul class="list">${leaves}${list.map((e) => {
     const s = R.STATUSES[e.status];
     return `<li class="${e.deleted ? 'gone' : ''}"><span class="time">${R.fmtMin(R.minutesOf(e.at))}</span><span class="dot" style="background:${s.color}"></span>
-      <span>${s.emoji} ${s.label}${e.note ? `<span class="muted small">・${esc(e.note)}</span>` : ''}${reporterHTML(e)}${loggedHTML(e, e.at)}${e.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(e, 'event')}</span>
+      <span class="body"><span class="main">${s.emoji} ${s.short || s.label}${e.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}</span>
+        <span class="meta">${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}${reporterHTML(e)}${loggedHTML(e, e.at)}${historyHTML(e, 'event')}</span></span>
       ${canWrite() && !e.deleted ? `<span class="spacer"></span><button class="btn sm" data-edit="${esc(e.id)}">修改</button>` : ''}</li>`;
   }).join('')}</ul>`;
 }
@@ -1138,9 +1159,9 @@ function shiftMonth(ym, n) {
 function monthNav() {
   const [y, m] = ui.month.split('-');
   return `<div class="month-nav">
-    <button class="btn sm" data-mn="-1">‹ 上個月</button>
+    <button class="btn sm" data-mn="-1" aria-label="上個月">‹<span class="lbl"> 上個月</span></button>
     <span class="title">WORLD ${Number(m)}・${y}</span>
-    <button class="btn sm" data-mn="1">下個月 ›</button></div>`;
+    <button class="btn sm" data-mn="1" aria-label="下個月"><span class="lbl">下個月 </span>›</button></div>`;
 }
 function bindMonthNav(root, rerender) {
   $$('[data-mn]', root).forEach((b) => b.onclick = () => {
@@ -1315,11 +1336,13 @@ function arrivalChart(days, s) {
   const rows = days.filter((d) => d.workday && !['future', 'pending'].includes(d.state));
   const arrs = rows.filter((d) => d.arrival != null && !d.remote).map((d) => d.arrival);
   if (!rows.length) return '';
-  const lo = Math.min(8 * 60, Math.floor(Math.min(...arrs, 540) / 30) * 30);
-  const hi = Math.max(10 * 60, Math.ceil(Math.max(...arrs, 540) / 30) * 30);
+  let lo = Math.min(8 * 60, Math.floor(Math.min(...arrs, 540) / 30) * 30);
+  let hi = Math.max(10 * 60, Math.ceil(Math.max(...arrs, 540) / 30) * 30);
+  const step = hi - lo > 150 ? 60 : 30; // 範圍大時每小時一格，避免刻度疊在一起
+  if (step === 60) { lo = Math.floor(lo / 60) * 60; hi = Math.ceil(hi / 60) * 60; } // 刻度對齊整點，頭尾都有刻度
   const x = (m) => `${((m - lo) / (hi - lo)) * 100}%`;
   const ticks = [];
-  for (let m = lo; m <= hi; m += 30) ticks.push(m);
+  for (let m = lo; m <= hi; m += step) ticks.push(m);
   const refs = `<span class="ref" style="left:${x(R.SCHEDULE.flexStart)}"></span><span class="ref main" style="left:${x(R.SCHEDULE.start)}"></span>`;
   const body = rows.map((d) => {
     const late = d.lateMinutes > 0;

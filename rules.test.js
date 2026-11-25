@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, parseHHMM as t,
+  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, fmtDurationShort, parseHHMM as t,
 } from './rules.js';
 
 const at = (date, hhmm) => taipeiMs(date, hhmm);
@@ -213,6 +213,12 @@ test('maskEmail：只留前幾個字，看不出完整 email', () => {
   assert.equal(maskEmail(''), '***');
   assert.equal(maskEmail('not-an-email'), '***');
   assert.equal(maskEmail('😀a@gmail.com'), '😀***@g***.com'); // 只有 2 個字元，只留 1 個
+});
+
+test('fmtDurationShort：窄欄位用的短格式', () => {
+  assert.equal(fmtDurationShort(472), '7時52分');
+  assert.equal(fmtDurationShort(120), '2時');
+  assert.equal(fmtDurationShort(5), '5分');
 });
 
 test('leaveSpanText', () => {

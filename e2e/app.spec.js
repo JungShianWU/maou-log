@@ -253,7 +253,7 @@ test('登入的冒險者：可以提供情報與修改，但不能刪除、不�
   await page.locator('[data-status="work"]').click();
   await expect(page.locator('#undo')).toHaveCount(0); // 復原＝隱藏，只有 GM
   await page.locator('#done').click();
-  await expect(page.locator('#view-record .list li').first().locator('.reporter')).toHaveText('・情報：ot***@e***.test');
+  await expect(page.locator('#view-record .list li').first().locator('.reporter')).toHaveText('情報：ot***@e***.test');
   await page.locator('[data-edit]').first().click();
   await expect(page.locator('#e-del')).toHaveCount(0);
   await page.locator('#e-cancel').click();
@@ -504,7 +504,7 @@ test('記錄時間與發生時間分開：記錄時間小字顯示', async ({ pa
   await open(page);
   const item = page.locator('#view-record .list li').first();
   await expect(item.locator('.time')).toHaveText('08:50');
-  await expect(item.locator('.logged')).toHaveText('・記錄於 09:05');
+  await expect(item.locator('.logged')).toHaveText('記錄於 09:05');
 
   // GM 當下記錄的不會重複顯示記錄時間
   await login(page, GM);
@@ -596,7 +596,7 @@ test('刪除只是隱藏：畫面不顯示、資料庫保留；GM 可打開「�
   await page.locator('#done').click();
   await expect(page.locator('#view-record h2', { hasText: '冒險者觀察日誌' })).toBeVisible();
   // 情報提供者：GM 的遮罩 email
-  await expect(page.locator('#view-record .list li').first().locator('.reporter')).toHaveText('・情報：g***@e***.test');
+  await expect(page.locator('#view-record .list li').first().locator('.reporter')).toHaveText('情報：g***@e***.test');
 
   await page.locator('[data-edit]').first().click();
   await page.locator('#e-del').click();
@@ -681,7 +681,7 @@ test('修改歷史：點「修正 N 次」展開過去的變更，情報提供�
   await it2.locator('[data-edit]').click();
   await other.locator('#e-status').selectOption('remote');
   await other.locator('#e-save').click();
-  await expect(it2.locator('.reporter')).toHaveText('・情報：g***@e***.test');
+  await expect(it2.locator('.reporter')).toHaveText('情報：g***@e***.test');
   await expect(it2.locator('[data-hist]')).toHaveText('✎ 修正 2 次');
   await it2.locator('[data-hist]').click();
   await expect(it2.locator('.hist li').first()).toContainText('ot***@e***.test 修正：原本是 08:55 上線');
@@ -860,6 +860,8 @@ test('傳聞：旁白必填，不改變魔王狀態，可以一次列出所有�
   await expect(viewer.locator('#sheet')).toContainText('傳聞一覽');
   await expect(viewer.locator('#sheet')).toContainText('聽說他今天要開長會');
   await expect(viewer.locator('#sheet')).toContainText('g***@e***.test');
+  // 傳聞內容與情報提供者分行顯示
+  await expect(viewer.locator('#sheet .list li .meta .reporter').first()).toHaveText('情報：g***@e***.test');
   await ctx.close();
 });
 
@@ -937,4 +939,13 @@ test('休戰日在家修煉不鎖記錄：補登仍可選所有狀態；只有�
   await page.locator('#d-add').click();
   await expect(page.locator('#e-time')).toHaveValue('09:00');
   await expect(page.locator('#e-status')).toHaveValue('work');
+});
+
+test('每日上線時刻：範圍大時刻度對齊整點，頭尾都有刻度', async ({ page, request }) => {
+  await put(request, 'boards/main/events/x1', { boss: 'b30', at: new Date('2026-11-23T07:40:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/x2', { boss: 'b30', at: new Date('2026-11-20T10:50:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await open(page);
+  await tab(page, 'stats');
+  const ticks = await page.locator('.arr .axis span').allTextContents();
+  expect(ticks).toEqual(['07:00', '08:00', '09:00', '10:00', '11:00']);
 });

@@ -85,6 +85,16 @@ export function fmtMin(m) {
   return `${pad(Math.floor(m / 60))}:${pad(Math.round(m % 60))}`;
 }
 
+// 短格式（窄欄位用）：7時52分、7時、52分
+export function fmtDurationShort(m) {
+  m = Math.round(m || 0);
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (h && r) return `${h}時${r}分`;
+  if (h) return `${h}時`;
+  return `${r}分`;
+}
+
 export function fmtDuration(m) {
   m = Math.round(m || 0);
   const h = Math.floor(m / 60);
