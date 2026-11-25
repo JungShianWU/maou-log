@@ -114,7 +114,7 @@ function sanitize(d, fallbackBoss = null) {
 
 // ---------- 快取（畫面讀這份，Firestore 更新時就地改寫）----------
 
-const cache = { adventurers: [], bosses: [], events: [], leaves: [], settings: { templates: { ...DEFAULT_TEMPLATES }, overrides: {}, signupOpen: false } };
+const cache = { adventurers: [], bosses: [], events: [], leaves: [], settings: { templates: { ...DEFAULT_TEMPLATES }, overrides: {}, signupOpen: false, siteOpen: true, closedNote: '' } };
 const changeListeners = new Set();
 const errorListeners = new Set();
 const notify = () => changeListeners.forEach((f) => f());
@@ -131,43 +131,101 @@ function write(promise) {
   promise.catch(fail);
 }
 
+// 魔王、日誌、閉關：網站開放、或 GM 登入時才讀（暫時關閉時規則也只讓 GM 讀）
+let boardLoaded = false;
+let dataSubs = null; // 正在監聽時是取消監聽的函式
+let dataFirst = null; // 等第一批資料到齊的回呼（停止、重試、放棄時都會呼叫，開站才不會卡住）
+let deniedRetries = 0;
+let dataGen = 0; // 每次建立監聽加一；同一批監聽被拒只處理一次
+const flushFirst = () => { const f = dataFirst; dataFirst = null; f?.(); };
+// 加入等待者：已有人在等就串起來，不覆蓋
+const addFirst = (fn) => { const prev = dataFirst; dataFirst = prev ? () => { prev(); fn(); } : fn; };
+const once = (fn) => { let done = false; return () => { if (!done) { done = true; fn(); } }; };
+const canReadData = () => cache.settings.siteOpen || isEditorUid(auth.currentUser?.uid);
+function stopData() {
+  flushFirst();
+  deniedRetries = 0;
+  if (!dataSubs) return;
+  dataSubs.forEach((u) => u());
+  dataSubs = null;
+  cache.bosses = []; cache.events = []; cache.leaves = []; // 關閉後畫面上不留資料
+  notify();
+}
+// 依「網站是否開放、是不是 GM」開始或停止監聽；第一批資料到齊（或不需要讀）時呼叫 onFirst
+function syncData(onFirst = () => {}) {
+  if (!boardLoaded) return;
+  if (!canReadData()) { stopData(); onFirst(); return; }
+  if (dataSubs) { if (dataFirst) addFirst(onFirst); else onFirst(); return; }
+  addFirst(onFirst);
+  const gen = ++dataGen;
+  let pending = 3;
+  const first = () => { if (--pending === 0) flushFirst(); };
+  const [a, b, z] = [once(first), once(first), once(first)];
+  const denied = (done) => (err) => {
+    done();
+    if (err.code !== 'permission-denied') { fail(err, 'read'); return; }
+    if (gen !== dataGen || !dataSubs) return; // 這批監聽已經處理過（另外兩個也會被拒）
+    if (!canReadData()) { stopData(); return; } // 剛被關閉：安靜停止
+    // 應該讀得到卻被拒（GM 剛登入、憑證還沒換好；或看板設定還沒更新）：拆掉監聽、先讓開站繼續，稍後重試；連續失敗才報錯
+    dataSubs.forEach((u) => u());
+    dataSubs = null;
+    flushFirst();
+    if (++deniedRetries > 3) { fail(err, 'read'); return; }
+    setTimeout(() => syncData(), 1500 * deniedRetries);
+  };
+  dataSubs = [
+    onSnapshot(col('bosses'), (snap) => {
+      cache.bosses = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((x, y) => x.level - y.level || x.name.localeCompare(y.name));
+      deniedRetries = 0;
+      z(); notify();
+    }, denied(z)),
+    onSnapshot(col('events'), (snap) => {
+      cache.events = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      a(); notify();
+    }, denied(a)),
+    onSnapshot(col('leaves'), (snap) => {
+      cache.leaves = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      b(); notify();
+    }, denied(b)),
+  ];
+}
+
 function subscribe() {
-  let pending = 4;
   return new Promise((resolve) => {
-    const first = () => { if (--pending === 0) resolve(); };
-    const once = (fn) => { let done = false; return () => { if (!done) { done = true; fn(); } }; };
-    const [a, b, c, z] = [once(first), once(first), once(first), once(first)];
-    [
-      onSnapshot(col('bosses'), (snap) => {
-        cache.bosses = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((x, y) => x.level - y.level || x.name.localeCompare(y.name));
-        z(); notify();
-      }, (err) => { z(); fail(err, 'read'); }),
-      onSnapshot(col('events'), (snap) => {
-        cache.events = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        a(); notify();
-      }, (err) => { a(); fail(err, 'read'); }),
-      onSnapshot(col('leaves'), (snap) => {
-        cache.leaves = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        b(); notify();
-      }, (err) => { b(); fail(err, 'read'); }),
-      // 冒險者清單不擋開站（不計入 pending）
-      onSnapshot(collection(db, 'adventurers'), (snap) => {
-        cache.adventurers = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
-        notify();
-      }, (err) => fail(err, 'read')),
-      onSnapshot(userDoc(), (snap) => {
-        const s = snap.data() || {};
-        const opened = !cache.settings.signupOpen && s.signupOpen === true;
-        cache.settings = {
-          templates: { ...DEFAULT_TEMPLATES, ...(s.templates || {}) },
-          overrides: { ...(s.overrides || {}) },
-          signupOpen: s.signupOpen === true, // 預設關閉
-        };
-        // 剛開放註冊（或快取的舊設定被伺服器更新）：已登入但還沒登記的帳號補登記
-        if (opened && auth.currentUser) registerAdventurer(auth.currentUser).catch((err) => fail(err));
-        c(); notify();
-      }, (err) => { c(); fail(err, 'read'); }),
-    ];
+    const c = once(resolve);
+    let cachedBoard = null;
+    function applyBoard(snap) {
+      cachedBoard = null;
+      const s = snap.data() || {};
+      const opened = !cache.settings.signupOpen && s.signupOpen === true;
+      cache.settings = {
+        templates: { ...DEFAULT_TEMPLATES, ...(s.templates || {}) },
+        overrides: { ...(s.overrides || {}) },
+        signupOpen: s.signupOpen === true, // 預設關閉
+        siteOpen: s.siteOpen !== false, // 預設開放
+        closedNote: str(s.closedNote, 60),
+      };
+      // 第一次：先知道網站開不開，再決定要不要讀資料；資料第一批到齊（或不需要讀）時才算開站完成
+      const first = !boardLoaded;
+      boardLoaded = true;
+      syncData(first ? c : undefined);
+      // 剛開放註冊（或快取的舊設定被伺服器更新）：已登入但還沒登記的帳號補登記
+      if (opened && auth.currentUser) registerAdventurer(auth.currentUser).catch((err) => fail(err));
+      notify();
+    }
+    // 冒險者清單不擋開站
+    onSnapshot(collection(db, 'adventurers'), (snap) => {
+      cache.adventurers = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      notify();
+    }, (err) => fail(err, 'read'));
+    onSnapshot(userDoc(), (snap) => {
+      if (!boardLoaded && snap.metadata.fromCache) { // 本機快取可能過期：先等伺服器，離線時 4 秒後才用快取
+        cachedBoard = snap;
+        setTimeout(() => { if (!boardLoaded && cachedBoard) applyBoard(cachedBoard); }, 4000);
+        return;
+      }
+      applyBoard(snap);
+    }, (err) => { boardLoaded = true; syncData(c); fail(err, 'read'); }); // 讀不到看板設定：當作開放照常讀資料（若其實關閉，規則會拒絕）
   });
 }
 
@@ -276,7 +334,8 @@ async function writeData(clean, { settings, existingBosses = new Map() }) {
   // 保留存檔裡原本的情報提供者；沒有的才算是讀取存檔的人
   clean.events.forEach((e) => ops.push((b) => b.set(doc(col('events')), { reporter: me(), ...e, by: me() })));
   clean.leaves.forEach((l) => ops.push((b) => b.set(doc(col('leaves')), { reporter: me(), ...l, by: me() })));
-  if (settings === 'replace') ops.push((b) => b.set(userDoc(), { ...clean.settings, signupOpen: cache.settings.signupOpen })); // 註冊開關維持原狀
+  const { signupOpen, siteOpen, closedNote } = cache.settings; // 註冊開關、網站開關維持原狀
+  if (settings === 'replace') ops.push((b) => b.set(userDoc(), { ...clean.settings, signupOpen, siteOpen, closedNote }));
   await commitInChunks(ops);
 }
 
@@ -314,6 +373,7 @@ export const account = {
       if (user) registerAdventurer(user).catch((err) => fail(err));
       refreshPresence();
       cb(user, !!user && isEditorUid(user.uid));
+      syncData(); // GM 登入／登出時，暫時關閉的網站要開始或停止讀資料（畫面身分先更新）
     });
   },
   login: (email, password) => signInWithEmailAndPassword(auth, email, password),
@@ -431,6 +491,13 @@ export const store = {
     cache.settings.signupOpen = open;
     write(setDoc(userDoc(), { signupOpen: open }, { merge: true }));
   },
+  // 暫時關閉網站（只有 GM 看得到內容）；note 是給觀戰者看的一句說明
+  async setSiteOpen(open, note = cache.settings.closedNote) {
+    const closedNote = str(note, 60);
+    cache.settings.siteOpen = open;
+    cache.settings.closedNote = closedNote;
+    write(setDoc(userDoc(), { siteOpen: open, closedNote }, { merge: true }));
+  },
   async setOverride(date, value) {
     if (value) cache.settings.overrides[date] = value;
     else delete cache.settings.overrides[date];
@@ -470,7 +537,8 @@ export const store = {
   async clearAll() {
     requireOnline();
     await hideDocs(await listAllDocs());
-    await setDoc(userDoc(), { templates: {}, overrides: {}, signupOpen: cache.settings.signupOpen }); // 註冊開關維持原狀
+    const { signupOpen, siteOpen, closedNote } = cache.settings; // 註冊開關、網站開關維持原狀
+    await setDoc(userDoc(), { templates: {}, overrides: {}, signupOpen, siteOpen, closedNote });
   },
 
   // 接雲端前留在這台裝置瀏覽器裡的舊存檔

@@ -7,9 +7,19 @@ service cloud.firestore {
     }
     // 冒險者：已登記在冒險者清單的帳號（GM 一律算）；可以提供情報（記錄狀態、閉關、新增／編輯魔王），但不能刪除（隱藏）
     // 關閉註冊時新帳號無法登記，所以就算繞過畫面建了帳號也只能觀戰
+    // 網站暫時關閉時，冒險者也不能提供情報（只有 GM 可以）
     function isMember() {
       return request.auth != null
-        && (isEditor() || exists(/databases/$(database)/documents/adventurers/$(request.auth.uid)));
+        && (isEditor() || (siteOpen() && exists(/databases/$(database)/documents/adventurers/$(request.auth.uid))));
+    }
+    // 網站是否開放（GM 在網站選單切換，存在 boards/main.siteOpen；沒設定＝開放）
+    function siteOpen() {
+      return !exists(/databases/$(database)/documents/boards/main) // 還沒有看板設定＝開放
+        || get(/databases/$(database)/documents/boards/main).data.get('siteOpen', true) == true;
+    }
+    // 魔王、日誌、閉關：開放時任何人都能看；暫時關閉時只有 GM 看得到
+    function canReadBoard() {
+      return siteOpen() || isEditor();
     }
     // 是否開放註冊（GM 在網站選單切換，存在 boards/main.signupOpen）
     function signupOpen() {
@@ -130,8 +140,11 @@ service cloud.firestore {
       allow read: if true;
       allow delete: if false;
       allow create, update: if isEditor() && board == 'main'
-        && request.resource.data.keys().hasOnly(['templates', 'overrides', 'signupOpen'])
+        && request.resource.data.keys().hasOnly(['templates', 'overrides', 'signupOpen', 'siteOpen', 'closedNote'])
         && request.resource.data.get('signupOpen', false) is bool
+        && request.resource.data.get('siteOpen', true) is bool
+        && request.resource.data.get('closedNote', '') is string
+        && request.resource.data.get('closedNote', '').size() <= 60
         && request.resource.data.get('templates', {}) is map
         && request.resource.data.get('overrides', {}) is map;
 
@@ -145,7 +158,7 @@ service cloud.firestore {
             && isText(request.resource.data.name, 20) && request.resource.data.name.size() >= 1
             && isText(request.resource.data.note, 200);
         }
-        allow read: if true;
+        allow read: if canReadBoard();
         allow delete: if false;
         allow create: if validBoss() && noHistory();
         // 等級只能提升，不能降低
@@ -165,7 +178,7 @@ service cloud.firestore {
             // 傳聞必須寫旁白（誰說了什麼）
             && (request.resource.data.status != 'rumor' || request.resource.data.note.matches('(?s).*\\S.*'));
         }
-        allow read: if true;
+        allow read: if canReadBoard();
         allow delete: if false;
         allow create: if validEvent() && reporterOnCreate() && noHistory();
         allow update: if validEvent() && notHiddenOrEditor() && reporterUnchanged() && ownerAndLoggedAtUnchanged()
@@ -186,7 +199,7 @@ service cloud.firestore {
             && (request.resource.data.kind != 'custom'
                 || (isHHMM(request.resource.data.start) && isHHMM(request.resource.data.end)));
         }
-        allow read: if true;
+        allow read: if canReadBoard();
         allow delete: if false;
         allow create: if validLeave() && reporterOnCreate() && noHistory();
         allow update: if validLeave() && notHiddenOrEditor() && reporterUnchanged() && ownerAndLoggedAtUnchanged()

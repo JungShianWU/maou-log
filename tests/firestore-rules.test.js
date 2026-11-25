@@ -276,3 +276,36 @@ test('造訪紀錄：未登入寫自己的裝置、登入寫自己的帳號（�
   await assertSucceeds(getDoc(doc(editor(), 'visits/' + id)));
   await assertFails(deleteDoc(doc(editor(), 'visits/' + id)));
 });
+
+test('暫時關閉網站：只有 GM 看得到魔王、日誌、閉關；冒險者不能提供情報；看板設定仍公開', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'boards/main'), { templates: {}, overrides: {}, siteOpen: false, closedNote: '整修中' });
+  });
+  await assertSucceeds(getDoc(doc(guest(), 'boards/main'))); // 要知道網站關閉了
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'boards/main/leaves/l1'), leave());
+  });
+  for (const p of ['boards/main/bosses/b30', 'boards/main/events/e1', 'boards/main/leaves/l1']) {
+    await assertFails(getDoc(doc(guest(), p)));
+    await assertFails(getDoc(doc(other(), p)));
+    await assertSucceeds(getDoc(doc(editor(), p)));
+  }
+  await assertFails(setDoc(doc(other(), 'boards/main/events/n1'), event({ by: OTHER, reporter: OTHER })));
+  await assertFails(setDoc(doc(other(), 'boards/main/bosses/nb'), boss({ by: OTHER })));
+  await assertFails(setDoc(doc(other(), 'boards/main/leaves/nl'), leave({ by: OTHER, reporter: OTHER })));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main/events/n2'), event()));
+  // 只有 GM 能切換；格式檢查
+  await assertFails(setDoc(doc(other(), 'boards/main'), { siteOpen: true }, { merge: true }));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main'), { siteOpen: true, closedNote: '' }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { siteOpen: 'yes' }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { closedNote: 'x'.repeat(61) }, { merge: true }));
+  // 重新開放後恢復
+  await assertSucceeds(getDoc(doc(guest(), 'boards/main/bosses/b30')));
+  await assertSucceeds(setDoc(doc(other(), 'boards/main/events/n3'), event({ by: OTHER, reporter: OTHER })));
+});
+
+test('還沒有看板設定時視為開放（任何人都能讀）', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => { await deleteDoc(doc(ctx.firestore(), 'boards/main')); });
+  await assertSucceeds(getDoc(doc(guest(), 'boards/main/bosses/b30')));
+  await assertSucceeds(setDoc(doc(other(), 'boards/main/events/n1'), event({ by: OTHER, reporter: OTHER })));
+});

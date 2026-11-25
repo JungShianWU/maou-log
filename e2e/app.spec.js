@@ -1115,3 +1115,84 @@ test('下線多久照實際時間算，不受 19:00 影響', async ({ page, requ
   await expect(page.locator('.now')).toContainText('從 18:10 開始・已 2 小時 20 分');
   await expect(page.locator('.now')).not.toContainText('算到');
 });
+
+test('暫時關閉網站：觀戰者與冒險者只看到關閉畫面，GM 照常使用並可重新開放', async ({ page, browser }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  await page.locator('#closed-note').fill('整修中，明天見');
+  await page.locator('#closed-note').dispatchEvent('change');
+  await expect(page.locator('#toast')).toHaveText('已儲存說明');
+  // 觀戰者先開著面板（關站時要被收起）
+  const viewerCtx = await browser.newContext();
+  const viewer = await viewerCtx.newPage();
+  await open(viewer);
+  await tab(viewer, 'settings');
+  await viewer.locator('#login').click();
+  await expect(viewer.locator('#sheet')).toBeVisible();
+
+  await page.locator('#toggle-site').click();
+  await expect(page.locator('#toggle-site')).toHaveText('再按一次確定關閉'); // 關閉要再按一次確認
+  await expect(page.locator('#closed-banner')).toBeHidden();
+  await page.locator('#toggle-site').click();
+  await expect(page.locator('#closed-banner')).toBeVisible(); // GM 看到提示，內容照常
+  await expect(page.locator('[data-boss]').first()).toBeVisible();
+
+  // 觀戰者：面板被收起，只看到關閉畫面與說明，讀不到魔王
+  await expect(viewer.locator('#closed')).toBeVisible();
+  await expect(viewer.locator('#sheet')).toBeHidden();
+  await expect(viewer.locator('#closed')).toContainText('魔王城暫時關閉中');
+  await expect(viewer.locator('#closed')).toContainText('整修中，明天見');
+  await expect(viewer.locator('nav.tabs')).toBeHidden();
+  await expect(viewer.locator('[data-boss]')).toHaveCount(0);
+  if (process.env.SHOT) {
+    const m = await (await browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true })).newPage();
+    await skipTutorial(m);
+    await m.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } }));
+    await m.goto('/?emulator');
+    await expect(m.locator('#closed')).toBeVisible();
+    await m.screenshot({ path: `${process.env.SHOT}/closed-360.png` });
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.evaluate(() => document.querySelector('#scroll').scrollTo(0, 0));
+    await page.screenshot({ path: `${process.env.SHOT}/closed-gm-360.png` });
+  }
+
+  // 冒險者登入也一樣，但有說明與登出的出路
+  await viewer.locator('#closed-login').click();
+  await viewer.locator('#lg-email').fill(OTHER.email);
+  await viewer.locator('#lg-pass').fill(OTHER.password);
+  await viewer.locator('#login-form button[type=submit]').click();
+  await expect(viewer.locator('#closed')).toContainText('你已用 ot***@e***.test 登入');
+  await expect(viewer.locator('[data-boss]')).toHaveCount(0);
+  await viewer.locator('#closed-logout').click();
+  await expect(viewer.locator('#closed-login')).toBeVisible();
+
+  // GM 重新開放：觀戰者的畫面即時恢復
+  await page.locator('#banner-open').click();
+  await expect(page.locator('#closed-banner')).toBeHidden();
+  await expect(viewer.locator('#closed')).toBeHidden();
+  await expect(viewer.locator('[data-boss]')).toHaveCount(2);
+  await expect(viewer.locator('#toast')).toHaveText('魔王城重新開放了');
+  await viewerCtx.close();
+});
+
+test('網站已關閉時 GM 從關閉畫面登入：看得到資料，按鍵在關閉畫面不作用', async ({ page, request }) => {
+  await put(request, 'boards/main', { siteOpen: false, closedNote: '休息中' });
+  await page.clock.setFixedTime(NOW);
+  await skipTutorial(page);
+  await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } }));
+  await page.goto('/?emulator');
+  await expect(page.locator('body.ready')).toBeAttached();
+  await expect(page.locator('#closed')).toContainText('休息中');
+  await page.keyboard.press('z'); // 掌機按鍵／鍵盤快捷鍵不作用
+  await expect(page.locator('#sheet')).toBeHidden();
+  await page.locator('#closed-login').click();
+  await page.locator('#lg-email').fill(GM.email);
+  await page.locator('#lg-pass').fill(GM.password);
+  await page.locator('#login-form button[type=submit]').click();
+  await expect(page.locator('#closed')).toBeHidden();
+  await expect(page.locator('#closed-banner')).toBeVisible();
+  await expect(page.locator('[data-boss]')).toHaveCount(2);
+  await expect(page.locator('#toast')).not.toContainText('同步失敗');
+});

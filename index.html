@@ -59,6 +59,15 @@
   }
   .card h2 { font-size: 18px; margin: 0 0 12px; color: var(--gold); font-weight: 400; }
   .card h2::before { content: '▶ '; content: '▶ ' / ''; color: var(--white); } /* 第一行給不支援替代文字語法的舊版 Safari */
+  body.site-closed #boss-bar, body.site-closed main, body.site-closed nav.tabs { display: none; }
+  .closed-card { text-align: center; padding: 40px 16px; margin-top: 8vh; }
+  .closed-card h2:focus { outline: none; }
+  .closed-card h2::before { content: none; }
+  .closed-card .closed-icon { font-size: 64px; margin-bottom: 12px; }
+  .closed-card p { margin: 8px 0 14px; }
+  #closed-banner { margin: 0 0 10px; }
+  #closed-banner .btn { flex: none; white-space: nowrap; min-height: 36px; }
+  #closed-banner[hidden], #closed[hidden] { display: none; } /* .banner 的 display:flex 會蓋過 hidden */
   .fold > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 10px; }
   .fold > summary::-webkit-details-marker { display: none; }
   .fold > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
@@ -412,6 +421,8 @@
     <h1 id="title"><span id="sprite"></span>魔王出沒紀錄</h1>
     <span class="date" id="clock"></span>
   </header>
+  <div id="closed-banner" class="banner" role="status" hidden></div>
+  <section id="closed" class="card closed-card" role="status" hidden></section>
   <div class="boss-bar" id="boss-bar"></div>
   <main>
     <section id="view-loading"><div class="loading blink">LOADING…</div></section>
@@ -752,6 +763,51 @@ function syncRoles() {
   ui.canRecord = member && !ui.viewOnly;
 }
 
+// 網站暫時關閉：GM 以外的人只看到關閉畫面
+const siteClosed = () => DB.settings.siteOpen === false;
+const closeArmed = () => Date.now() < (ui.closeArmedUntil || 0);
+const closedForMe = () => siteClosed() && !ui.isEditor;
+function renderClosed() {
+  const shut = closedForMe();
+  const changed = ui.wasClosed !== undefined && ui.wasClosed !== shut;
+  ui.wasClosed = shut;
+  document.body.classList.toggle('site-closed', shut);
+  $('#closed').hidden = !shut;
+  const cardKey = shut ? JSON.stringify([DB.settings.closedNote, ui.user?.uid || '', ui.user?.email || '']) : '';
+  if (shut && cardKey !== ui.closedCardKey) { // 內容沒變就不重建（避免焦點跑掉、重複朗讀）
+    $('#closed').innerHTML = `<div class="closed-icon" aria-hidden="true">🏰</div><h2 tabindex="-1">魔王城暫時關閉中</h2>
+      ${DB.settings.closedNote ? `<p>${esc(DB.settings.closedNote)}</p>` : '<p class="muted">GM 正在整理，晚點再來看看。</p>'}
+      <p class="small muted">重新開放後這頁會自動更新，不用重新整理。</p>
+      ${ui.user
+        ? `<p class="small muted">你已用 ${esc(R.maskEmail(ui.user.email))} 登入，網站重新開放後就能使用。</p>
+           <button class="btn" id="closed-logout">登出／換帳號</button>`
+        : '<button class="btn" id="closed-login">🔑 GM 登入</button>'}`;
+    $('#closed-login')?.addEventListener('click', openLogin);
+    $('#closed-logout')?.addEventListener('click', () => account.logout());
+  }
+  ui.closedCardKey = cardKey;
+  if (shut) ['record', 'calendar', 'stats', 'settings'].forEach((v) => { $(`#view-${v}`).innerHTML = ''; }); // 隱藏的頁面也不留資料
+  if (changed && shut) { // 剛被關閉：收起面板與教學，畫面上不留資料
+    if (sheet.open) closeSheet();
+    if (tutOpen()) { clearInterval(tut.typing); tut.typing = null; $('#tutorial').hidden = true; } // 不標記看過，開放後還會再出現
+    $('#closed h2')?.focus();
+  }
+  if (changed && !shut && !ui.isEditor) { toast('魔王城重新開放了'); setTimeout(maybeStartTutorial, 0); }
+  const banner = $('#closed-banner');
+  banner.hidden = !(siteClosed() && ui.isEditor);
+  if (!banner.hidden) {
+    banner.innerHTML = '<span class="small">🔒 網站暫時關閉中：只有 GM 看得到內容</span><span class="spacer"></span><button class="btn sm primary" id="banner-open">重新開放</button>';
+    $('#banner-open').onclick = () => setSiteOpen(true);
+  }
+  return shut;
+}
+async function setSiteOpen(open) {
+  if (!ui.isEditor) return;
+  await store.setSiteOpen(open, $('#closed-note')?.value ?? DB.settings.closedNote);
+  toast(open ? '網站已重新開放' : '網站已暫時關閉');
+  render();
+}
+
 function render() {
   if (!document.body.classList.contains('ready')) return;
   syncRoles();
@@ -763,7 +819,8 @@ function render() {
       ? `<button class="role ${ui.canRecord ? 'gm' : ''}" id="role" title="切換記錄／觀戰模式">${role}</button>`
       : `<span class="role" id="role">${role}</span>`)
     + onlineBadge();
-  $('#role').onclick = ui.user ? toggleViewOnly : null;
+  $('#role').onclick = ui.user && !closedForMe() ? toggleViewOnly : null;
+  if (renderClosed()) return;
   if (ui.tab === 'record') renderRecord();
   if (ui.tab === 'calendar') renderCalendar();
   if (ui.tab === 'stats') renderStats();
@@ -784,7 +841,7 @@ const goTab = (name) => $(`nav.tabs [data-tab="${name}"]`).click();
 function pressKey(key) {
   const btn = $(`.controls [data-key="${key}"]`);
   if (btn) { btn.classList.add('pressed'); setTimeout(() => btn.classList.remove('pressed'), 120); }
-  if (!document.body.classList.contains('ready')) return;
+  if (!document.body.classList.contains('ready') || closedForMe()) return; // 網站關閉時按鍵不作用
   if (tutOpen()) { // 教學開著時，按鍵用來翻頁
     if (key === 'a' || key === 'right' || key === 'start') tutNext();
     else if (key === 'left') tutPrev();
@@ -1473,6 +1530,14 @@ function renderSettings() {
       </div>
     </div>` : ''}
     ${ui.isEditor ? `<div class="card">
+      <h2>網站開放</h2>
+      <div class="row wrap-row"><span class="small">${siteClosed() ? '🔒 暫時關閉中：只有 GM 看得到內容' : '🟢 開放中：任何人都能觀戰'}</span><span class="spacer"></span>
+        <button class="btn sm ${siteClosed() ? 'primary' : 'danger'}" id="toggle-site">${siteClosed() ? '重新開放' : closeArmed() ? '再按一次確定關閉' : '暫時關閉'}</button></div>
+      <label class="f" style="margin-top:10px"><span>關閉時給大家看的一句話（選填）</span>
+        <input type="text" id="closed-note" maxlength="60" placeholder="例如：整修中，明天見" value="${esc(DB.settings.closedNote)}"></label>
+      <div class="small muted">離開輸入框就會自動儲存。關閉期間，冒險者也看不到、不能記錄；資料都保留，重新開放後一切照舊。</div>
+    </div>
+    <div class="card">
       <h2>冒險者註冊</h2>
       <div class="row"><span class="small">${DB.settings.signupOpen ? '🟢 開放中：登入視窗會顯示「建立帳號」' : '🔒 已關閉：新帳號只能觀戰'}</span><span class="spacer"></span>
         <button class="btn sm ${DB.settings.signupOpen ? '' : 'primary'}" id="toggle-signup">${DB.settings.signupOpen ? '關閉註冊' : '開放註冊'}</button></div>
@@ -1507,6 +1572,18 @@ function renderSettings() {
   $('#logout')?.addEventListener('click', () => account.logout());
   $('#toggle-view')?.addEventListener('click', toggleViewOnly);
   $('#toggle-hidden')?.addEventListener('click', toggleShowHidden);
+  $('#toggle-site')?.addEventListener('click', (e) => {
+    if (siteClosed()) { setSiteOpen(true); return; } // 重新開放不用確認
+    if (closeArmed()) { ui.closeArmedUntil = 0; setSiteOpen(false); return; } // 關閉影響全站：4 秒內再按一次才生效
+    ui.closeArmedUntil = Date.now() + 4000;
+    e.currentTarget.textContent = '再按一次確定關閉';
+    setTimeout(() => { const b = $('#toggle-site'); if (b && !closeArmed() && !siteClosed()) b.textContent = '暫時關閉'; }, 4100);
+  });
+  $('#closed-note')?.addEventListener('change', async (e) => {
+    if (!ui.isEditor) return;
+    await store.setSiteOpen(!siteClosed(), e.target.value);
+    toast('已儲存說明');
+  });
   $('#toggle-signup')?.addEventListener('click', async () => {
     if (!ui.isEditor) return;
     await store.setSignupOpen(!DB.settings.signupOpen);
@@ -1665,9 +1742,9 @@ window.addEventListener('resize', () => { if (tutOpen()) showStep(tut.i, 1); });
 
 // 第一次來的冒險者自動開始；GM 第一次登入時補教編輯功能
 function maybeStartTutorial() {
-  if (tutOpen() || !document.body.classList.contains('ready')) return;
+  if (tutOpen() || !document.body.classList.contains('ready') || closedForMe()) return;
   // 開站與登入都會呼叫；計時器觸發時再檢查一次，避免教學被開兩次
-  const later = (kind) => setTimeout(() => { if (!tutOpen()) startTutorial(kind); }, 400);
+  const later = (kind) => setTimeout(() => { if (!tutOpen() && !closedForMe()) startTutorial(kind); }, 400);
   if (storage.get(TUTORIAL_KEY.viewer) !== 'done') later('viewer');
   else if (ui.canRecord && storage.get(TUTORIAL_KEY.gm) !== 'done') later('gm');
 }
@@ -1786,7 +1863,7 @@ store.onChange(() => {
   // 冒險者清單同步到了、身分剛變成冒險者時（例如剛註冊），補教記錄方法
   const before = ui.canRecord;
   syncRoles();
-  if (!typing()) render();
+  if (!typing() || closedForMe() !== ui.wasClosed) render(); // 網站剛關閉／重新開放時，正在輸入也要立刻切換
   if (!before && ui.canRecord) maybeStartTutorial();
 });
 store.onError((err, kind) => toast(`${kind === 'read' ? '雲端同步失敗' : '雲端存檔失敗'}：${err.code || err.message}`));
