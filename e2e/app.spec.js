@@ -14,7 +14,7 @@ const NOW = new Date('2026-11-24T09:12:00+08:00');
 const OWNER = { Authorization: 'Bearer owner' }; // 模擬器的管理權限，跳過安全規則
 
 // 直接在模擬器寫入資料（Firestore REST 格式）
-const value = (v) => (typeof v === 'number' ? { integerValue: String(v) } : { stringValue: v });
+const value = (v) => (typeof v === 'number' ? { integerValue: String(v) } : typeof v === 'boolean' ? { booleanValue: v } : { stringValue: v });
 async function put(request, path, data) {
   const fields = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, value(v)]));
   const res = await request.patch(`${DOCS}/${path}`, { headers: OWNER, data: { fields } });
@@ -33,11 +33,22 @@ test.beforeEach(async ({ request }) => {
   // 兩隻魔王：Lv.30（有屬性備註）、Lv.50
   await put(request, 'boards/main/bosses/b30', { level: 30, name: '魔王', note: '愛喝咖啡', by: GM.uid });
   await put(request, 'boards/main/bosses/b50', { level: 50, name: '魔王', note: '', by: GM.uid });
+  // OTHER 是已登記的冒險者
+  await put(request, `adventurers/${OTHER.uid}`, { masked: 'ot***@e***.test', joinedAt: 1 });
 });
 
+// 新手教學第一次會自動出現；一般測試先標記為已看過
+async function skipTutorial(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('maou-log:tutorial', 'done');
+    localStorage.setItem('maou-log:tutorial-gm', 'done');
+  });
+}
+
 // 打開網站並選擇魔王（pick = null 表示不選）
-async function open(page, pick = 30) {
+async function open(page, pick = 30, { tutorial = false } = {}) {
   await page.clock.setFixedTime(NOW);
+  if (!tutorial) await skipTutorial(page);
   // 休戰日資料改用空清單，測試不依賴外部網路
   await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
   await page.goto('/?emulator');
@@ -93,6 +104,7 @@ test('沒有選擇魔王時看不到任何資料', async ({ page, request }) => 
 test('網址的魔王參數壞掉時不會整頁空白', async ({ page }) => {
   await page.clock.setFixedTime(NOW);
   await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await skipTutorial(page);
   await page.goto('/?emulator#b=%E0%A4%A');
   await expect(page.locator('body.ready')).toBeAttached();
   await expect(page.locator('#view-record')).toContainText('請先從上方選擇');
@@ -115,11 +127,10 @@ test('觀戰者可以切換魔王，網址會記住', async ({ page, request }) 
   await expect(page.locator('.now .label')).toContainText('Lv.50');
 });
 
-test('登入畫面沒有建立帳號，密碼錯誤會提示', async ({ page }) => {
+test('登入畫面：密碼錯誤會提示', async ({ page }) => {
   await open(page);
   await tab(page, 'settings');
   await page.locator('#login').click();
-  await expect(page.locator('#sheet')).not.toContainText('建立帳號');
   await page.locator('#lg-email').fill(GM.email);
   await page.locator('#lg-pass').fill('wrong-password');
   await page.locator('#login-form button[type=submit]').click();
@@ -193,6 +204,7 @@ test('GM 新增魔王並編輯屬性備註，觀戰者看得到', async ({ page,
   const viewer = await viewerCtx.newPage();
   await viewer.clock.setFixedTime(NOW);
   await viewer.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await skipTutorial(viewer);
   await viewer.goto('/?emulator');
   await chip(viewer, 70).click();
   await expect(viewer.locator('.boss-note')).toContainText('會突襲，週五請假');
@@ -233,14 +245,26 @@ test('GM 補登：時間空白會被擋下', async ({ page }) => {
   await expect(page.locator('#sheet')).toContainText('08:45');
 });
 
-test('非編輯者登入：仍是觀戰模式，不能記錄', async ({ page }) => {
+test('登入的冒險者：可以提供情報與修改，但不能刪除、不能改設定', async ({ page }) => {
   await open(page);
   await login(page, OTHER);
-  await expect(page.locator('#toast')).toContainText('沒有編輯權限');
-  await expect(page.locator('#role')).toHaveText(/觀戰/);
+  await expect(page.locator('#role')).toHaveText('⚔️ 冒險者');
   await tab(page, 'record');
-  await expect(page.locator('[data-status]')).toHaveCount(0);
-  await expect(page.locator('#boss-add')).toHaveCount(0);
+  await page.locator('[data-status="work"]').click();
+  await expect(page.locator('#undo')).toHaveCount(0); // 復原＝隱藏，只有 GM
+  await page.locator('#done').click();
+  await expect(page.locator('#view-record .list li').first().locator('.reporter')).toHaveText('・情報：ot***@e***.test');
+  await page.locator('[data-edit]').first().click();
+  await expect(page.locator('#e-del')).toHaveCount(0);
+  await page.locator('#e-cancel').click();
+  await expect(page.locator('#boss-add')).toBeVisible();
+  await page.locator('#edit-boss').click();
+  await expect(page.locator('#b-del')).toHaveCount(0);
+  await page.locator('#b-cancel').click();
+  await tab(page, 'settings');
+  await expect(page.locator('[data-tpl]')).toHaveCount(0);
+  await expect(page.locator('#bk-export')).toHaveCount(0);
+  await expect(page.locator('#toggle-hidden')).toHaveCount(0);
 });
 
 test('登出後回到觀戰模式', async ({ page }) => {
@@ -302,7 +326,7 @@ test('同時在線人數包含沒登入的觀戰者', async ({ page, browser }) 
 
 test('電腦版掌機：按鍵可以換頁、換魔王、開關分享', async ({ page }) => {
   await open(page);
-  await expect(page.locator('.controls')).toBeVisible();
+  await expect(page.locator('.dpad')).toBeVisible();
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('#view-calendar')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
@@ -312,7 +336,8 @@ test('電腦版掌機：按鍵可以換頁、換魔王、開關分享', async ({
   await page.keyboard.press('z');
   await expect(page.locator('#sheet')).toBeVisible();
   await expect(page.locator('#msg')).toHaveValue(/Lv\.50/);
-  await page.keyboard.press('x');
+  // 視窗打開時游標在訊息框裡，X 會被當成打字；Esc 一律可以關閉
+  await page.keyboard.press('Escape');
   await expect(page.locator('#sheet')).not.toBeVisible();
   // 畫面上的按鈕也能按
   await page.locator('.controls [data-key="right"]').click();
@@ -356,11 +381,14 @@ test('同一天重疊的閉關會被擋下（上半場＋下半場可以）', as
 test('電腦版可以切換機種外觀，重新整理後仍記得', async ({ page }) => {
   await open(page);
   const skin = () => page.evaluate(() => document.documentElement.dataset.skin);
-  expect(await skin()).toBe('boy');
+  expect(await skin()).toBe('wide'); // 預設：橫式掌機
+  await expect(page.locator('.brand .name-wide')).toBeVisible();
   await tab(page, 'settings');
+  await page.locator('#skins [data-skin="boy"]').click();
+  expect(await skin()).toBe('boy');
+  await expect(page.locator('.brand .name-boy')).toBeVisible();
   await page.locator('#skins [data-skin="wide"]').click();
   expect(await skin()).toBe('wide');
-  await expect(page.locator('.brand .name-wide')).toBeVisible();
   await expect(page.locator('.dpad')).toBeVisible();
   await page.reload();
   expect(await skin()).toBe('wide');
@@ -433,4 +461,274 @@ test('讀取存檔：失敗後可重選同一個檔案；超長名稱以字元�
   const name = (await res.json()).fields.name.stringValue;
   expect(name).toBe('a' + '😴'.repeat(9));
   expect(name.isWellFormed()).toBe(true);
+});
+
+test('新手教學：第一次打開自動出現，可翻頁、略過，之後不再自動出現', async ({ page }) => {
+  await open(page, 30, { tutorial: true });
+  const box = page.locator('#tutorial');
+  await expect(box).toBeVisible();
+  await expect(page.locator('#tut-text')).toContainText('歡迎');
+  await page.locator('#tut-next').click(); // 打字中：先把字打完
+  await page.locator('#tut-next').click();
+  await expect(page.locator('#tut-text')).toContainText('選一隻要觀戰的魔王');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#tut-text')).toContainText('歡迎');
+  await page.keyboard.press('x');
+  await expect(box).toBeHidden();
+  await page.reload();
+  await expect(page.locator('body.ready')).toBeAttached();
+  await page.waitForTimeout(800);
+  await expect(box).toBeHidden();
+
+  // 選單可以重看，一路走到最後
+  await tab(page, 'settings');
+  await page.locator('#replay-tutorial').click();
+  await expect(box).toBeVisible();
+  for (let i = 0; i < 30 && await box.isVisible(); i++) await page.locator('#tut-next').click();
+  await expect(box).toBeHidden();
+});
+
+test('新手教學：GM 第一次登入補教編輯功能', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('maou-log:tutorial', 'done'));
+  await open(page, 30, { tutorial: true });
+  await expect(page.locator('#tutorial')).toBeHidden();
+  await login(page, GM);
+  await expect(page.locator('#tutorial')).toBeVisible();
+  await expect(page.locator('#tut-text')).toContainText('提供情報');
+});
+
+test('記錄時間與發生時間分開：記錄時間小字顯示', async ({ page, request }) => {
+  const at = new Date('2026-11-24T08:50:00+08:00').getTime();
+  const loggedAt = new Date('2026-11-24T09:05:00+08:00').getTime();
+  await put(request, 'boards/main/events/e1', { boss: 'b30', at, status: 'work', note: '', loggedAt, by: GM.uid });
+  await open(page);
+  const item = page.locator('#view-record .list li').first();
+  await expect(item.locator('.time')).toHaveText('08:50');
+  await expect(item.locator('.logged')).toHaveText('・記錄於 09:05');
+
+  // GM 當下記錄的不會重複顯示記錄時間
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('[data-status="away"]').click();
+  await page.locator('#done').click();
+  await expect(page.locator('#view-record .list li').nth(1).locator('.logged')).toHaveCount(0);
+});
+
+test('在家修煉的日子 GM 不能再更新狀態，但可以修改日誌', async ({ page, request }) => {
+  await put(request, 'boards/main/events/r1', { boss: 'b30', at: new Date('2026-11-24T09:30:00+08:00').getTime(), status: 'remote', note: '', by: GM.uid });
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await expect(page.locator('#view-record')).toContainText('今天在家修煉，不再更新狀態');
+  await expect(page.locator('[data-status]')).toHaveCount(0);
+  await expect(page.locator('#offsets')).toHaveCount(0);
+  await expect(page.locator('#view-record [data-edit]')).toHaveCount(1);
+  // 地圖的單日細節也不能補登
+  await tab(page, 'calendar');
+  await page.locator('[data-day="2026-11-24"]').click();
+  await expect(page.locator('#d-add')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await tab(page, 'record');
+  // Lv.50 沒有在家修煉，照常可以記錄
+  await chip(page, 50).click();
+  await expect(page.locator('[data-status]').first()).toBeVisible();
+});
+
+test('在家修煉不顯示上下線時間', async ({ page, request }) => {
+  await put(request, 'boards/main/events/r1', { boss: 'b30', at: new Date('2026-11-24T09:30:00+08:00').getTime(), status: 'remote', note: '', by: GM.uid });
+  await open(page);
+  await expect(page.locator('#view-record')).toContainText('在家修煉：照班表計算，不記錄上下線時間');
+  await expect(page.locator('#view-record .facts')).toHaveCount(0);
+  await tab(page, 'calendar');
+  await page.locator('[data-day="2026-11-24"]').click();
+  await expect(page.locator('#sheet')).toContainText('不記錄上下線時間');
+  await expect(page.locator('#sheet .facts')).toHaveCount(0);
+});
+
+test('開放註冊：新冒險者出現在清單，只顯示遮住的 email 與在線狀態', async ({ page, browser, request }) => {
+  await put(request, 'boards/main', { signupOpen: true });
+  await open(page);
+  await tab(page, 'settings');
+  await page.locator('#login').click();
+  await page.locator('#lg-email').fill('newbie.hero@example.test');
+  await page.locator('#lg-pass').fill('e2e-newbie-pass');
+  await page.locator('#lg-signup').click();
+  await expect(page.locator('#sheet')).not.toBeVisible();
+  await expect(page.locator('#role')).toHaveText('⚔️ 冒險者');
+
+  const me = page.locator('[data-adv]', { hasText: 'ne***@e***.test' });
+  await expect(me).toContainText('（你）');
+  await expect(me).toContainText('在線');
+  await tab(page, 'record');
+  await expect(page.locator('[data-status]').first()).toBeVisible(); // 冒險者可以提供情報
+
+  // 沒登入的觀戰者也看得到清單，並被算成「未登入的觀戰者」
+  const ctx = await browser.newContext();
+  const viewer = await ctx.newPage();
+  await open(viewer);
+  await tab(viewer, 'settings');
+  await expect(viewer.locator('[data-adv]', { hasText: 'ne***@e***.test' })).toContainText('在線');
+  await expect(viewer.locator('#view-settings')).toContainText('另有 1 位未登入的觀戰者');
+  await expect(viewer.locator('#view-settings')).not.toContainText('newbie.hero'); // 別人看不到完整 email
+
+  // 新冒險者登出 → 觀戰者看到他變成離線
+  await tab(page, 'settings');
+  await page.locator('#logout').click();
+  await expect(viewer.locator('[data-adv]', { hasText: 'ne***@e***.test' })).toContainText('離線');
+  await ctx.close();
+});
+
+test('冒險者清單：GM 會標示 GM', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  await expect(page.locator('[data-adv]', { hasText: 'g***@e***.test' })).toContainText('GM');
+});
+
+test('刪除只是隱藏：畫面不顯示、資料庫保留；GM 可打開「顯示已隱藏」', async ({ page, browser, request }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('[data-status="work"]').click();
+  await page.locator('#done').click();
+  await expect(page.locator('#view-record h2', { hasText: '冒險者觀察日誌' })).toBeVisible();
+  // 情報提供者：GM 的遮罩 email
+  await expect(page.locator('#view-record .list li').first().locator('.reporter')).toHaveText('・情報：g***@e***.test');
+
+  await page.locator('[data-edit]').first().click();
+  await page.locator('#e-del').click();
+  await expect(page.locator('#toast')).toContainText('資料仍保留');
+  await expect(page.locator('#view-record .list')).toHaveCount(0);
+
+  // 資料庫裡還在，只是標記 deleted
+  // 寫入是背景送出的，等它到雲端
+  await expect.poll(async () => {
+    const docs = (await (await request.get(`${DOCS}/boards/main/events`, { headers: OWNER })).json()).documents || [];
+    return docs.map((d) => [d.fields.deleted?.booleanValue, d.fields.history?.arrayValue?.values?.length]);
+  }).toEqual([[true, 1]]); // 還在、標記隱藏、修改歷史多一筆「隱藏」
+
+  // GM 打開開關才看得到，標示「已隱藏」且不能修改
+  await tab(page, 'settings');
+  await page.locator('#toggle-hidden').click();
+  await tab(page, 'record');
+  await expect(page.locator('#view-record .banner')).toContainText('正在顯示已隱藏的紀錄');
+  await expect(page.locator('#view-record .list li.gone')).toContainText('已隱藏');
+  await expect(page.locator('#view-record [data-edit]')).toHaveCount(0);
+  await page.locator('#hide-hidden').click();
+  await expect(page.locator('#view-record .list')).toHaveCount(0);
+
+  // 觀戰者看不到
+  const ctx = await browser.newContext();
+  const viewer = await ctx.newPage();
+  await open(viewer);
+  await expect(viewer.locator('#view-record .list')).toHaveCount(0);
+  await ctx.close();
+});
+
+test('刪除魔王只是隱藏：GM 打開開關才看得到', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await chip(page, 50).click();
+  await tab(page, 'record');
+  await page.locator('#edit-boss').click();
+  await page.locator('#b-del').click();
+  await page.locator('#b-del').click();
+  await expect(page.locator('[data-boss]')).toHaveCount(1);
+  await tab(page, 'settings');
+  await page.locator('#toggle-hidden').click();
+  await expect(page.locator('[data-boss].gone')).toContainText('Lv.50');
+  // 被隱藏的魔王只能看，不能記錄或編輯
+  await page.locator('[data-boss].gone').click();
+  await tab(page, 'record');
+  await expect(page.locator('#view-record')).toContainText('這隻魔王已隱藏，只能查看不能記錄');
+  await expect(page.locator('[data-status]')).toHaveCount(0);
+  await expect(page.locator('#edit-boss')).toHaveCount(0);
+  await tab(page, 'calendar');
+  await page.locator('[data-day="2026-11-20"]').click();
+  await expect(page.locator('#d-add')).toHaveCount(0);
+  await expect(page.locator('#d-leave')).toHaveCount(0);
+});
+
+test('修改歷史：點「修正 N 次」展開過去的變更，情報提供者不變', async ({ page, browser }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('#note').fill('開會');
+  await page.locator('[data-status="work"]').click();
+  await page.locator('#done').click();
+  const item = page.locator('#view-record .list li').first();
+  await expect(item.locator('[data-hist]')).toHaveCount(0);
+
+  // GM 把時間改成 08:55
+  await item.locator('[data-edit]').click();
+  await page.locator('#e-time').fill('08:55');
+  await page.locator('#e-save').click();
+  await expect(item.locator('.time')).toHaveText('08:55');
+  await expect(item.locator('[data-hist]')).toHaveText('✎ 修正 1 次');
+  await item.locator('[data-hist]').click();
+  await expect(item.locator('.hist')).toContainText('g***@e***.test 修正：原本是 09:12 上線（開會）');
+
+  // 冒險者再改一次：情報提供者仍是 GM，歷史多一筆
+  const ctx = await browser.newContext();
+  const other = await ctx.newPage();
+  await open(other);
+  await login(other, OTHER);
+  await tab(other, 'record');
+  const it2 = other.locator('#view-record .list li').first();
+  await it2.locator('[data-edit]').click();
+  await other.locator('#e-status').selectOption('remote');
+  await other.locator('#e-save').click();
+  await expect(it2.locator('.reporter')).toHaveText('・情報：g***@e***.test');
+  await expect(it2.locator('[data-hist]')).toHaveText('✎ 修正 2 次');
+  await it2.locator('[data-hist]').click();
+  await expect(it2.locator('.hist li').first()).toContainText('ot***@e***.test 修正：原本是 08:55 上線');
+  await ctx.close();
+});
+
+test('註冊開關：預設關閉看不到建立帳號；GM 可在選單開放', async ({ page, browser }) => {
+  await open(page);
+  await tab(page, 'settings');
+  await page.locator('#login').click();
+  await expect(page.locator('#lg-signup')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#toggle-signup')).toHaveCount(0); // 觀戰者看不到開關
+
+  await login(page, GM);
+  await tab(page, 'settings');
+  await expect(page.locator('#view-settings')).toContainText('已關閉');
+  await page.locator('#toggle-signup').click();
+  await expect(page.locator('#view-settings')).toContainText('開放中');
+
+  const ctx = await browser.newContext();
+  const visitor = await ctx.newPage();
+  await open(visitor);
+  await tab(visitor, 'settings');
+  await visitor.locator('#login').click();
+  await expect(visitor.locator('#lg-signup')).toBeVisible();
+  await ctx.close();
+});
+
+test('新註冊的冒險者：看過一般教學後，第一次登入會補教記錄方法', async ({ page, request }) => {
+  await put(request, 'boards/main', { signupOpen: true });
+  await page.addInitScript(() => localStorage.setItem('maou-log:tutorial', 'done'));
+  await open(page, 30, { tutorial: true });
+  await expect(page.locator('#tutorial')).toBeHidden();
+  await tab(page, 'settings');
+  await page.locator('#login').click();
+  await page.locator('#lg-email').fill('rookie@example.test');
+  await page.locator('#lg-pass').fill('e2e-rookie-pass');
+  await page.locator('#lg-signup').click();
+  await expect(page.locator('#tutorial')).toBeVisible();
+  await expect(page.locator('#tut-text')).toContainText('提供情報');
+});
+
+test('讀取存檔不會關掉註冊開關', async ({ page, request }) => {
+  await put(request, 'boards/main', { signupOpen: true });
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  const save = { bosses: [{ id: 'b99', level: 99, name: '魔王', note: '' }], events: [], leaves: [], settings: {} };
+  await page.locator('#bk-import').setInputFiles({ name: 'save.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(save)) });
+  await expect(page.locator('#toast')).toContainText('讀取完成');
+  await expect(page.locator('#view-settings')).toContainText('開放中');
 });

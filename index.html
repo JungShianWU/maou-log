@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1a1c2c">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>魔王出沒紀錄</title>
-<script>try { document.documentElement.dataset.skin = localStorage.getItem('maou-log:skin') || 'boy'; } catch { document.documentElement.dataset.skin = 'boy'; }</script>
+<script>try { document.documentElement.dataset.skin = localStorage.getItem('maou-log:skin') || 'wide'; } catch { document.documentElement.dataset.skin = 'wide'; }</script>
 <style>
   @font-face {
     font-family: 'Cubic11';
@@ -160,6 +160,13 @@
   .list li:last-child { border-bottom: 0; }
   .list .time { font-variant-numeric: tabular-nums; color: var(--cyan); width: 48px; flex: none; }
   .dot { width: 10px; height: 10px; flex: none; }
+  .logged, .reporter { font-size: 11px; color: var(--slate); margin-left: 2px; white-space: nowrap; }
+  .gone { opacity: .45; }
+  .hist-btn { background: none; border: 1px dashed var(--slate); color: var(--cyan); font-size: 11px; padding: 0 5px; margin-left: 6px; cursor: pointer; text-decoration: none; }
+  .hist { list-style: none; margin: 6px 0 0; padding: 6px 8px; background: var(--night); border-left: 3px solid var(--cyan); font-size: 12px; color: var(--mist); text-decoration: none; }
+  .hist li { padding: 2px 0; border: 0; display: block; }
+  .list li.gone > span:not(.time) { text-decoration: line-through; }
+  .gone-tag { font-size: 11px; color: var(--orange); border: 1px solid var(--orange); padding: 0 4px; margin-left: 6px; text-decoration: none; display: inline-block; }
 
   /* 每日上線時刻 */
   .arr { display: grid; grid-template-columns: 76px 1fr 64px; align-items: center; column-gap: 8px; }
@@ -208,6 +215,25 @@
   button.role { background: none; font: inherit; font-size: 12px; cursor: pointer; }
   .role.online { border-color: var(--green); color: var(--lime); }
   .login-err { color: var(--orange); font-size: 14px; min-height: 22px; margin: 4px 0 8px; }
+
+  /* 新手教學 */
+  .tutorial { position: absolute; inset: 0; z-index: 40; }
+  .tutorial[hidden] { display: none; }
+  .tutorial .tut-spot { position: absolute; border: 3px solid var(--gold); box-shadow: 0 0 0 9999px rgba(8,9,18,.72); transition: all .25s steps(4); pointer-events: none; }
+  .tutorial .tut-box {
+    position: absolute; left: 12px; right: 12px; bottom: 14px; max-width: 520px; margin: 0 auto;
+    background: var(--navy); border: 3px solid var(--white); box-shadow: inset 0 0 0 3px var(--night), 6px 6px 0 #000; padding: 14px 14px 12px;
+    display: grid; grid-template-columns: 52px 1fr; gap: 4px 12px;
+  }
+  .tutorial .tut-box[data-pos="top"] { top: 14px; bottom: auto; }
+  .tutorial .tut-npc { font-size: 34px; line-height: 52px; text-align: center; background: var(--night); border: 2px solid var(--gold); height: 52px; animation: bob 1.2s steps(2) infinite; }
+  .tutorial .tut-name { font-family: 'Cubic11', ui-monospace, monospace; color: var(--gold); font-size: 15px; display: flex; justify-content: space-between; }
+  .tutorial .tut-name span { color: var(--sub); font-size: 12px; }
+  .tutorial .tut-text { grid-column: 1 / -1; min-height: 66px; font-size: 15px; line-height: 1.6; margin-top: 6px; }
+  .tutorial .tut-text::after { content: '▼'; color: var(--gold); margin-left: 4px; font-size: 11px; animation: blink 1s steps(1) infinite; }
+  .tutorial .tut-actions { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 8px; }
+  .tutorial .tut-actions .spacer { flex: 1; }
+  .tutorial .btn:disabled { opacity: .4; cursor: default; }
 
   /* 底部導覽 */
   nav.tabs {
@@ -366,6 +392,20 @@
 <div class="backdrop" id="backdrop" hidden></div>
 <dialog class="sheet" id="sheet"><div class="sheet-in" id="sheet-in"></div></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="tutorial" id="tutorial" hidden role="dialog" aria-label="新手教學">
+  <div class="tut-spot" id="tut-spot"></div>
+  <div class="tut-box" id="tut-box">
+    <div class="tut-npc" aria-hidden="true">🧙</div>
+    <div class="tut-name">嚮導<span id="tut-count"></span></div>
+    <div class="tut-text" id="tut-text" aria-live="polite"></div>
+    <div class="tut-actions">
+      <button class="btn sm" id="tut-skip">略過</button>
+      <span class="spacer"></span>
+      <button class="btn sm" id="tut-prev">◀ 上一步</button>
+      <button class="btn sm primary" id="tut-next">下一步 ▶</button>
+    </div>
+  </div>
+</div>
   </div>
 </div>
 <div class="brand" aria-hidden="true"><span class="name-boy">MAOU BOY</span><span class="name-wide">MAOU PORTABLE</span><small>PIXEL LOG</small><span class="hint">← → 換頁　Z 確認　X 關閉　SHIFT 換魔王</span></div>
@@ -391,7 +431,7 @@
 
 <script type="module">
 import * as R from './rules.js';
-import { store, account, loadCalendar, watchOnline } from './store.js';
+import { store, account, loadCalendar, watchOnline, isEditorUid } from './store.js';
 import { VERSION } from './version.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -413,8 +453,12 @@ const ui = {
   user: null,
   isEditor: false,     // 登入的帳號在編輯名單裡
   viewOnly: storage.get('maou-log:view-only') === '1', // 編輯者自己切到觀戰，避免誤觸
-  canEdit: false,      // 實際能不能編輯 = 編輯者且沒有切到觀戰
+  canEdit: false,      // GM 專用功能（刪除／隱藏、範本、休戰日、存檔）= GM 且沒有切到觀戰
+  canRecord: false,    // 提供情報（記錄、閉關、新增／編輯魔王、修改日誌）= 已登入且沒有切到觀戰
   online: null,        // 同時在線人數（含沒登入的）
+  onlineUids: new Set(), // 在線的冒險者（已登入）
+  showHidden: false,   // GM 專用：顯示已隱藏（刪除）的紀錄；預設不顯示，重新整理就關掉
+  anonOnline: 0,       // 在線但沒登入的人數
   bossId: bossFromHash() || storage.get('maou-log:boss') || null,
   customAt: null,
   calendar: {},
@@ -455,21 +499,57 @@ function dayInfo(date) { return R.dayType(date, ui.calendar, DB.settings.overrid
 
 // ---------- 魔王 ----------
 // 目前選的魔王；地圖、成就、日誌都只看這隻
-const currentBoss = () => DB.bosses.find((b) => b.id === ui.bossId) || null;
+// 刪除只是標記隱藏：一般只看沒被隱藏的；GM 打開「顯示已隱藏」時，日誌清單與魔王選單才會列出來（統計一律不算）
+const seeHidden = () => ui.showHidden && ui.isEditor;
+const visibleBosses = () => DB.bosses.filter((b) => !b.deleted || seeHidden());
+const currentBoss = () => visibleBosses().find((b) => b.id === ui.bossId) || null;
+// 能不能記錄目前這隻魔王：被隱藏的魔王一律唯讀（GM 打開「顯示已隱藏」時也只能看）
+const canWrite = () => ui.canRecord && !currentBoss()?.deleted;
 const bossName = (b = currentBoss()) => R.bossLabel(b);
-const bossEvents = (id = ui.bossId) => DB.events.filter((e) => e.boss === id);
-const bossLeaves = (id = ui.bossId) => DB.leaves.filter((l) => l.boss === id);
+const bossEvents = (id = ui.bossId) => DB.events.filter((e) => e.boss === id && !e.deleted);
+const bossLeaves = (id = ui.bossId) => DB.leaves.filter((l) => l.boss === id && !l.deleted);
+// 某天被隱藏的日誌與閉關（只有 GM 打開開關時才列出）
+const hiddenEvents = (date) => (seeHidden() ? DB.events.filter((e) => e.boss === ui.bossId && e.deleted && R.dateKey(e.at) === date) : []);
+const hiddenLeaves = (date) => (seeHidden() ? DB.leaves.filter((l) => l.boss === ui.bossId && l.deleted && l.date === date) : []);
+
+// 顯示某個帳號：只用去識別化的 email
+function userText(uid) {
+  if (!uid) return '';
+  const adv = DB.adventurers.find((a) => a.uid === uid);
+  return adv ? adv.masked : isEditorUid(uid) ? 'GM' : '某位冒險者';
+}
+// 情報提供者：記錄的人（沒有 reporter 的舊資料用 by）
+const reporterText = (x) => userText(x.reporter || x.by);
+
+// 修改歷史：有修正過的紀錄顯示「✎ 修正 N 次」，點一下展開（新的在上面）
+function historyHTML(x, kind) {
+  const h = Array.isArray(x.history) ? x.history : [];
+  if (!h.length) return '';
+  const fmtT = (t) => `${fmtDate(R.dateKey(t))} ${R.fmtMin(R.minutesOf(t))}`;
+  const before = (e) => (kind === 'event'
+    ? `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status]?.label || e.status}${e.note ? `（${e.note}）` : ''}`
+    : `${fmtDate(e.date)} ${e.type}・${R.leaveSpanText(e)}${e.note ? `（${e.note}）` : ''}`);
+  const rows = [...h].reverse().map((e) => `<li>${fmtT(e.t)} ${esc(userText(e.by))} ${e.action === 'hide' ? '隱藏' : '修正'}：原本是 ${esc(before(e))}</li>`).join('');
+  return `<button class="hist-btn" data-hist>✎ 修正 ${h.length} 次</button><ul class="hist" hidden>${rows}</ul>`;
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-hist]');
+  if (!btn) return;
+  const box = btn.nextElementSibling;
+  box.hidden = !box.hidden;
+});
+const reporterHTML = (x) => { const t = reporterText(x); return t ? `<span class="reporter">・情報：${esc(t)}</span>` : ''; };
 
 // 不自動挑魔王，沒選就看不到資料。選的魔王暫時不在清單裡（例如本機快取還沒有新魔王）時保留選擇，
 // 等資料同步到了就會顯示；真的被刪掉的魔王會顯示「請先選擇」。
 
 // 沒有選魔王時，冒險／地圖／成就都只顯示這張卡片
 function noBossCard(el) {
-  const has = DB.bosses.length > 0;
+  const has = visibleBosses().length > 0;
   el.innerHTML = `<div class="card" style="text-align:center">
     <div class="now" style="justify-content:center"><div class="emoji">${has ? '👆' : '❔'}</div></div>
     <p>${has ? '請先從上方選擇要觀戰的魔王' : '還沒有魔王出沒'}</p>
-    ${!has && ui.canEdit ? '<button class="btn primary" id="first-boss">＋ 新增第一隻魔王</button>' : ''}</div>`;
+    ${!has && ui.canRecord ? '<button class="btn primary" id="first-boss">＋ 新增第一隻魔王</button>' : ''}</div>`;
   $('#first-boss', el)?.addEventListener('click', () => openBossEditor());
 }
 window.addEventListener('hashchange', () => {
@@ -486,14 +566,14 @@ function selectBoss(id) {
 // 魔王選單：每隻魔王顯示今天的最新狀態
 function renderBossBar() {
   const today = todayKey();
-  const chips = DB.bosses.map((b) => {
+  const chips = visibleBosses().map((b) => {
     const last = bossEvents(b.id).filter((e) => R.dateKey(e.at) === today).sort((x, y) => y.at - x.at)[0];
-    const icon = last ? R.STATUSES[last.status].emoji : '💤';
-    return `<button class="boss-chip" data-boss="${esc(b.id)}" aria-pressed="${b.id === ui.bossId}">${icon} <span class="lvl">Lv.${b.level}</span> ${esc(b.name)}</button>`;
+    const icon = b.deleted ? '🗑️' : last ? R.STATUSES[last.status].emoji : '💤';
+    return `<button class="boss-chip ${b.deleted ? 'gone' : ''}" data-boss="${esc(b.id)}" aria-pressed="${b.id === ui.bossId}">${icon} <span class="lvl">Lv.${b.level}</span> ${esc(b.name)}</button>`;
   }).join('');
   $('#boss-bar').innerHTML = chips
-    + (ui.canEdit ? '<button class="boss-chip add" id="boss-add">＋ 新增魔王</button>' : '')
-    + (!DB.bosses.length && !ui.canEdit ? '<span class="muted small">還沒有魔王出沒</span>' : '');
+    + (ui.canRecord ? '<button class="boss-chip add" id="boss-add">＋ 新增魔王</button>' : '')
+    + (!visibleBosses().length && !ui.canRecord ? '<span class="muted small">還沒有魔王出沒</span>' : '');
   $$('[data-boss]').forEach((b) => b.onclick = () => selectBoss(b.dataset.boss));
   $('#boss-add')?.addEventListener('click', () => openBossEditor());
 }
@@ -508,7 +588,7 @@ function openBossEditor(boss) {
     </div>
     <label class="f"><span>屬性備註（觀戰者也看得到）</span><textarea id="b-note" maxlength="200" placeholder="例如：愛喝咖啡、週三固定開會">${esc(boss?.note || '')}</textarea></label>
     <div class="sheet-actions">
-      ${boss ? '<button class="btn danger" id="b-del">刪除</button>' : '<button class="btn" id="b-cancel">取消</button>'}
+      ${boss && ui.canEdit ? '<button class="btn danger" id="b-del">刪除</button>' : '<button class="btn" id="b-cancel">取消</button>'}
       <button class="btn primary" id="b-save">儲存</button>
     </div>
   `, (el) => {
@@ -528,10 +608,10 @@ function openBossEditor(boss) {
       const b = e.currentTarget;
       if (!b.dataset.armed) {
         b.dataset.armed = '1';
-        b.textContent = count ? `連同 ${count} 筆紀錄一起刪？再按一次` : '再按一次確定刪除';
+        b.textContent = count ? `連同 ${count} 筆紀錄一起隱藏？再按一次` : '再按一次確定刪除';
         return;
       }
-      try { await store.deleteBoss(boss.id); toast('已刪除'); } catch (err) { toast('刪除失敗：' + (err.code || err.message)); }
+      try { await store.deleteBoss(boss.id); toast('已刪除（資料仍保留）'); } catch (err) { toast('刪除失敗：' + (err.code || err.message)); }
       closeSheet();
       render();
     });
@@ -598,16 +678,25 @@ function closeSheet() { sheet.close(); }
 sheet.addEventListener('close', () => { $('#backdrop').hidden = true; });
 $('#backdrop').addEventListener('click', closeSheet);
 
+// 角色：GM＝編輯名單；冒險者＝已登記在冒險者清單（關閉註冊時才建的帳號只能觀戰）
+function syncRoles() {
+  const member = !!ui.user && (ui.isEditor || DB.adventurers.some((a) => a.uid === ui.user.uid));
+  ui.canEdit = ui.isEditor && !ui.viewOnly;
+  ui.canRecord = member && !ui.viewOnly;
+}
+
 function render() {
   if (!document.body.classList.contains('ready')) return;
+  syncRoles();
   renderBossBar();
-  const role = ui.canEdit ? '✏️ GM' : ui.isEditor ? '👀 觀戰（GM）' : '👀 觀戰';
+  const who = ui.isEditor ? 'GM' : '冒險者';
+  const role = ui.canRecord ? (ui.isEditor ? '✏️ GM' : '⚔️ 冒險者') : ui.user ? `👀 觀戰（${who}）` : '👀 觀戰';
   $('#clock').innerHTML = `${fmtDate(todayKey())} ${R.fmtMin(nowMin())}`
-    + (ui.isEditor
-      ? `<button class="role ${ui.canEdit ? 'gm' : ''}" id="role" title="切換 GM／觀戰模式">${role}</button>`
+    + (ui.user
+      ? `<button class="role ${ui.canRecord ? 'gm' : ''}" id="role" title="切換記錄／觀戰模式">${role}</button>`
       : `<span class="role" id="role">${role}</span>`)
     + onlineBadge();
-  $('#role').onclick = ui.isEditor ? toggleViewOnly : null;
+  $('#role').onclick = ui.user ? toggleViewOnly : null;
   if (ui.tab === 'record') renderRecord();
   if (ui.tab === 'calendar') renderCalendar();
   if (ui.tab === 'stats') renderStats();
@@ -629,6 +718,12 @@ function pressKey(key) {
   const btn = $(`.controls [data-key="${key}"]`);
   if (btn) { btn.classList.add('pressed'); setTimeout(() => btn.classList.remove('pressed'), 120); }
   if (!document.body.classList.contains('ready')) return;
+  if (tutOpen()) { // 教學開著時，按鍵用來翻頁
+    if (key === 'a' || key === 'right' || key === 'start') tutNext();
+    else if (key === 'left') tutPrev();
+    else if (key === 'b') endTutorial();
+    return;
+  }
   const scroller = sheet.open ? $('#sheet-in') : $('#scroll');
   if (key === 'up' || key === 'down') { scroller.scrollBy({ top: key === 'up' ? -160 : 160, behavior: 'smooth' }); return; }
   if (key === 'b') { if (sheet.open) closeSheet(); else goTab('record'); return; }
@@ -637,9 +732,10 @@ function pressKey(key) {
     const i = TABS.indexOf(ui.tab) + (key === 'left' ? -1 : 1);
     goTab(TABS[(i + TABS.length) % TABS.length]);
   } else if (key === 'start') goTab('record');
-  else if (key === 'select' && DB.bosses.length) {
-    const i = DB.bosses.findIndex((b) => b.id === ui.bossId);
-    selectBoss(DB.bosses[(i + 1) % DB.bosses.length].id);
+  else if (key === 'select' && visibleBosses().length) {
+    const list = visibleBosses();
+    const i = list.findIndex((b) => b.id === ui.bossId);
+    selectBoss(list[(i + 1) % list.length].id);
   } else if (key === 'a') {
     if (ui.tab !== 'record') goTab('record');
     $('#share-now')?.click();
@@ -659,6 +755,14 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- 訊息 ----------
+// 記錄時間（按下記錄的時刻）：和發生時間相差 1 分鐘以上才顯示，用小字
+function loggedText(x, occurredAt) {
+  if (!Number.isFinite(x.loggedAt) || Math.abs(x.loggedAt - occurredAt) < 60_000) return '';
+  const d = R.dateKey(x.loggedAt);
+  return `記錄於 ${d === R.dateKey(occurredAt) ? '' : fmtDate(d) + ' '}${R.fmtMin(R.minutesOf(x.loggedAt))}`;
+}
+const loggedHTML = (x, occurredAt) => { const t = loggedText(x, occurredAt); return t ? `<span class="logged">・${t}</span>` : ''; };
+
 function lateText(day) { return day.lateMinutes > 0 ? `（晚上線 ${R.fmtDuration(day.lateMinutes)}）` : ''; }
 
 function eventVars(ev, note) {
@@ -748,7 +852,7 @@ async function recordStatus(status) {
   openNotify({
     title: `✔ 已存檔：${R.STATUSES[status].emoji} ${R.STATUSES[status].label}・${R.fmtMin(R.minutesOf(at))}`,
     text: R.renderTemplate(tpl, eventVars(ev, note)),
-    undo: () => store.deleteEvent(ev.id),
+    undo: ui.canEdit ? () => store.deleteEvent(ev.id) : null,
   });
 }
 
@@ -778,9 +882,11 @@ function renderRecord() {
   const boss = currentBoss();
   if (!boss) { noBossCard($('#view-record')); return; }
   const who = `<span class="lv">Lv.${boss.level}</span> ${esc(boss.name)}`;
+  const goneNote = boss.deleted ? '<div class="banner"><span class="small">🗑️ 這隻魔王已隱藏，只能查看不能記錄</span></div>' : '';
 
   $('#view-record').innerHTML = `
-    ${missing && ui.canEdit ? `<div class="banner"><span>⚠️ ${fmtDate(missing.date)} 沒看到 ${esc(bossName())} 下線</span><span class="spacer"></span>
+    ${goneNote}
+    ${missing && canWrite() ? `<div class="banner"><span>⚠️ ${fmtDate(missing.date)} 沒看到 ${esc(bossName())} 下線</span><span class="spacer"></span>
       <button class="btn sm" id="fix-missing">補登</button></div>` : ''}
 
     <div class="card">
@@ -792,7 +898,8 @@ function renderRecord() {
             ${todayLeave ? `<br>閉關：${esc(todayLeave)}` : ''}</div>
         </div>
       </div>
-      ${day.arrival != null ? `
+      ${day.remote ? '<div class="boss-note" style="border-left-color:var(--cyan)">🏠 在家修煉：照班表計算，不記錄上下線時間</div>' : ''}
+      ${day.arrival != null && !day.remote ? `
       <div class="facts">
         <div class="fact"><div class="k">上線</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
         <div class="fact"><div class="k">可下線</div><div class="v">${R.fmtMin(day.expectedLeave)}</div></div>
@@ -801,12 +908,16 @@ function renderRecord() {
       <div class="bar-label"><span>EXP</span><span class="num">${Math.round(exp)}%</span></div>
       <div class="hp"><div style="width:${exp}%"></div></div>
       ${day.lateMinutes ? `<div class="small" style="color:var(--danger);margin-top:8px">晚上線 ${R.fmtDuration(day.lateMinutes)}</div>` : ''}` : ''}
-      ${boss.note || ui.canEdit ? `<div class="boss-note"><span class="t">📜 ${boss.note ? esc(boss.note) : '<span class="muted">還沒有屬性備註</span>'}</span>
-        ${ui.canEdit ? '<button class="btn sm" id="edit-boss">✏️ 編輯</button>' : ''}</div>` : ''}
+      ${boss.note || canWrite() ? `<div class="boss-note"><span class="t">📜 ${boss.note ? esc(boss.note) : '<span class="muted">還沒有屬性備註</span>'}</span>
+        ${canWrite() ? '<button class="btn sm" id="edit-boss">✏️ 編輯</button>' : ''}</div>` : ''}
       <button class="btn line block" id="share-now" style="margin-top:14px">📣 分享目前狀態到 LINE</button>
     </div>
 
-    ${ui.canEdit ? `<div class="card">
+    ${canWrite() && day.remote ? `<div class="card"><div class="small">🏠 今天在家修煉，不再更新狀態。</div>
+      <div class="small muted" style="margin-top:6px">記錯了的話，可以在下方日誌修改${ui.canEdit ? '或刪除' : ''}那一筆。</div>
+      <button class="btn sm" id="add-leave" style="margin-top:10px">🏝️ 登記閉關</button></div>` : ''}
+
+    ${canWrite() && !day.remote ? `<div class="card">
       <h2>時光機</h2>
       <div class="chips" id="offsets">
         ${[[0, '現在'], [5, '5 分前'], [15, '15 分前'], [30, '30 分前'], ['custom', '自選']].map(([v, t]) =>
@@ -829,13 +940,16 @@ function renderRecord() {
         <input type="text" id="note" placeholder="例如：出門打怪" maxlength="100" value="${esc(ui.note)}"></label>
     </div>` : ''}
 
-    ${day.events.length ? `<div class="card"><h2>今日冒險日誌</h2>${eventList(day)}</div>` : ''}
+    ${ui.showHidden && ui.isEditor ? '<div class="banner"><span class="small">👁 正在顯示已隱藏的紀錄（只有 GM 看得到）</span><span class="spacer"></span><button class="btn sm" id="hide-hidden">關閉</button></div>' : ''}
+    ${day.events.length || hiddenEvents(today).length ? `<div class="card"><h2>冒險者觀察日誌</h2>${eventList(day)}</div>` : ''}
   `;
 
   bindEventList($('#view-record'));
   $('#share-now').onclick = shareNow;
-  if (!ui.canEdit) return;
+  $('#hide-hidden')?.addEventListener('click', toggleShowHidden);
+  if (!canWrite()) return;
   $('#edit-boss').onclick = () => openBossEditor(boss);
+  if (day.remote) { $('#add-leave').onclick = () => openLeaveEditor(today); return; } // 在家修煉的日子不能再記錄狀態，但可以登記閉關
   $$('#offsets .chip').forEach((b) => b.onclick = () => {
     const v = b.dataset.v;
     ui.offset = v === 'custom' ? 'custom' : Number(v);
@@ -850,11 +964,12 @@ function renderRecord() {
 }
 
 function eventList(day) {
-  return `<ul class="list">${day.events.map((e) => {
+  const list = [...day.events, ...hiddenEvents(day.date)].sort((a, b) => a.at - b.at);
+  return `<ul class="list">${list.map((e) => {
     const s = R.STATUSES[e.status];
-    return `<li><span class="time">${R.fmtMin(R.minutesOf(e.at))}</span><span class="dot" style="background:${s.color}"></span>
-      <span>${s.emoji} ${s.label}${e.note ? `<span class="muted small">・${esc(e.note)}</span>` : ''}</span>
-      ${ui.canEdit ? `<span class="spacer"></span><button class="btn sm" data-edit="${esc(e.id)}">修改</button>` : ''}</li>`;
+    return `<li class="${e.deleted ? 'gone' : ''}"><span class="time">${R.fmtMin(R.minutesOf(e.at))}</span><span class="dot" style="background:${s.color}"></span>
+      <span>${s.emoji} ${s.label}${e.note ? `<span class="muted small">・${esc(e.note)}</span>` : ''}${reporterHTML(e)}${loggedHTML(e, e.at)}${e.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(e, 'event')}</span>
+      ${canWrite() && !e.deleted ? `<span class="spacer"></span><button class="btn sm" data-edit="${esc(e.id)}">修改</button>` : ''}</li>`;
   }).join('')}</ul>`;
 }
 function bindEventList(root) {
@@ -876,7 +991,7 @@ function openEventEditor({ date, ev, preset = {}, back }) {
     </select></label>
     <label class="f"><span>旁白</span><input type="text" id="e-note" value="${esc(ev?.note || '')}" maxlength="100"></label>
     <div class="sheet-actions">
-      ${ev ? '<button class="btn danger" id="e-del">刪除</button>' : '<button class="btn" id="e-cancel">取消</button>'}
+      ${ev && ui.canEdit ? '<button class="btn danger" id="e-del">刪除</button>' : '<button class="btn" id="e-cancel">取消</button>'}
       <button class="btn primary" id="e-save">儲存</button>
     </div>
   `, (el) => {
@@ -886,11 +1001,13 @@ function openEventEditor({ date, ev, preset = {}, back }) {
       if (!/^\d{2}:\d{2}$/.test($('#e-time', el).value) || !Number.isFinite(at)) { toast('請輸入時間'); return; }
       if (at > Date.now() + 60000) { toast('時間不能在未來'); return; }
       const patch = { at, status: $('#e-status', el).value, note: $('#e-note', el).value.trim() };
-      if (ev) await store.updateEvent(ev.id, patch); else await store.addEvent({ ...patch, boss: ui.bossId });
+      try {
+        if (ev) await store.updateEvent(ev.id, patch); else await store.addEvent({ ...patch, boss: ui.bossId });
+      } catch (err) { toast(err.message); return; }
       toast('已儲存');
       after();
     };
-    $('#e-del', el)?.addEventListener('click', async () => { await store.deleteEvent(ev.id); toast('已刪除'); after(); });
+    $('#e-del', el)?.addEventListener('click', async () => { await store.deleteEvent(ev.id); toast('已刪除（資料仍保留）'); after(); });
     $('#e-cancel', el)?.addEventListener('click', () => (back ? back() : closeSheet()));
   });
 }
@@ -930,7 +1047,7 @@ function openLeaveEditor(date, back) {
       openNotify({
         title: `已登記閉關・${fmtDate(lv.date)}`,
         text: R.renderTemplate(DB.settings.templates.leave, leaveVars(saved)),
-        undo: () => store.deleteLeave(saved.id),
+        undo: ui.canEdit ? () => store.deleteLeave(saved.id) : null,
       });
     };
   });
@@ -1025,7 +1142,8 @@ function openDay(date) {
   const fact = (k, v, bad) => `<div class="fact"><div class="k">${k}</div><div class="v ${bad ? 'bad' : ''}">${v}</div></div>`;
   openSheet(`
     <h3>${fmtDate(date, true)} <span class="muted small">${esc(stLabel)}${info.reason ? '・' + esc(info.reason) : ''}</span></h3>
-    ${d.events.length ? `
+    ${d.remote ? `<div class="boss-note" style="margin-top:0">🏠 在家修煉：照班表計算，不記錄上下線時間（上線時數 ${R.fmtDuration(d.workMinutes)}）</div>` : ''}
+    ${d.events.length && !d.remote ? `
       <div class="facts" style="margin-top:0">
         ${fact('上線', R.fmtMin(d.arrival), d.lateMinutes > 0)}
         ${fact('下線', d.departure != null ? R.fmtMin(d.departure) : '未見', d.earlyMinutes > 0)}
@@ -1043,26 +1161,26 @@ function openDay(date) {
       <div style="margin-top:10px">${timelineHTML(d)}</div>` : ''}
 
     <div class="card" style="margin-top:12px">
-      <div class="row"><h2 style="margin:0">冒險日誌</h2><span class="spacer"></span>${ui.canEdit ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}</div>
-      ${d.events.length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
+      <div class="row"><h2 style="margin:0">冒險者觀察日誌</h2><span class="spacer"></span>${canWrite() && !d.remote ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}</div>
+      ${d.events.length || hiddenEvents(d.date).length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
     </div>
 
     <div class="card">
-      <div class="row"><h2 style="margin:0">閉關</h2><span class="spacer"></span>${ui.canEdit ? '<button class="btn sm" id="d-leave">＋ 登記</button>' : ''}</div>
-      ${d.leaves.length ? `<ul class="list">${d.leaves.map((l) => `<li><span>${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.note ? `<span class="muted small">・${esc(l.note)}</span>` : ''}</span>
-        ${ui.canEdit ? `<span class="spacer"></span><button class="btn sm danger" data-del-leave="${esc(l.id)}">刪除</button>` : ''}</li>`).join('')}</ul>` : '<div class="muted small" style="margin-top:8px">沒有閉關</div>'}
+      <div class="row"><h2 style="margin:0">閉關</h2><span class="spacer"></span>${canWrite() ? '<button class="btn sm" id="d-leave">＋ 登記</button>' : ''}</div>
+      ${d.leaves.length || hiddenLeaves(d.date).length ? `<ul class="list">${[...d.leaves, ...hiddenLeaves(d.date)].map((l) => `<li class="${l.deleted ? 'gone' : ''}"><span>${esc(l.type)}・${esc(R.leaveSpanText(l))}${l.note ? `<span class="muted small">・${esc(l.note)}</span>` : ''}${reporterHTML(l)}${loggedHTML(l, R.taipeiMs(l.date, '09:00'))}${l.deleted ? '<span class="gone-tag">已隱藏</span>' : ''}${historyHTML(l, 'leave')}</span>
+        ${ui.canEdit && canWrite() && !l.deleted ? `<span class="spacer"></span><button class="btn sm danger" data-del-leave="${esc(l.id)}">刪除</button>` : ''}</li>`).join('')}</ul>` : '<div class="muted small" style="margin-top:8px">沒有閉關</div>'}
     </div>
 
     <div class="row wrap-row small">
       <span class="muted">這天是${info.workday ? '冒險日' : '休戰日'}${ov ? '（手動設定）' : ''}</span><span class="spacer"></span>
-      ${!ui.canEdit ? '' : ov ? '<button class="btn sm" id="d-ov-clear">恢復預設</button>' : `<button class="btn sm" id="d-ov">改成${info.workday ? '休戰日' : '冒險日'}</button>`}
+      ${!ui.canEdit || !canWrite() ? '' : ov ? '<button class="btn sm" id="d-ov-clear">恢復預設</button>' : `<button class="btn sm" id="d-ov">改成${info.workday ? '休戰日' : '冒險日'}</button>`}
     </div>
     <div class="sheet-actions" style="grid-template-columns:1fr"><button class="btn" id="d-close">關閉</button></div>
   `, (el) => {
     const back = () => openDay(date);
     $('#d-close', el).onclick = closeSheet;
-    if (!ui.canEdit) return;
-    $('#d-add', el).onclick = () => openEventEditor({ date, back, preset: d.events.length ? { status: 'off', time: R.fmtMin(R.SCHEDULE.end) } : { status: 'work', time: '09:00' } });
+    if (!canWrite()) return;
+    $('#d-add', el)?.addEventListener('click', () => openEventEditor({ date, back, preset: d.events.length ? { status: 'off', time: R.fmtMin(R.SCHEDULE.end) } : { status: 'work', time: '09:00' } }));
     $('#d-leave', el).onclick = () => openLeaveEditor(date, back);
     $$('[data-edit]', el).forEach((b) => b.onclick = () => openEventEditor({ date, ev: DB.events.find((e) => e.id === b.dataset.edit), back }));
     $$('[data-del-leave]', el).forEach((b) => b.onclick = async () => { await store.deleteLeave(b.dataset.delLeave); render(); back(); });
@@ -1171,11 +1289,12 @@ function downloadCSV(days) {
   const rows = days.filter((d) => d.state !== 'future').map((d) => [
     d.date, WEEK[parseDate(d.date).getDay()], d.workday ? '冒險日' : `休戰日${d.reason ? '・' + d.reason : ''}`,
     R.displayState(d) === 'late' ? '失誤（遲到／早退）' : R.DAY_STATES[R.displayState(d)].label,
-    d.arrival != null ? R.fmtMin(d.arrival) : '', d.departure != null ? R.fmtMin(d.departure) : '',
-    d.expectedLeave != null ? R.fmtMin(d.expectedLeave) : '',
+    // 在家修煉觀察不到上下線，不輸出時間
+    d.arrival != null && !d.remote ? R.fmtMin(d.arrival) : '', d.departure != null && !d.remote ? R.fmtMin(d.departure) : '',
+    d.expectedLeave != null && !d.remote ? R.fmtMin(d.expectedLeave) : '',
     d.lateMinutes, d.earlyMinutes, d.overtimeMinutes, d.workMinutes, d.lunchMinutes, d.awayCount, d.awayMinutes, d.napMinutes,
     d.leaves.map((l) => `${l.type}・${R.leaveSpanText(l, '-')}`).join('；'),
-    d.events.map((e) => `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status].label}${e.note ? `(${e.note})` : ''}`).join('；'),
+    d.events.map((e) => { const lg = loggedText(e, e.at); const rp = reporterText(e); return `${R.fmtMin(R.minutesOf(e.at))} ${R.STATUSES[e.status].label}${e.note ? `(${e.note})` : ''}${lg ? `[${lg}]` : ''}${rp ? `[情報 ${rp}]` : ''}`; }).join('；'),
   ].map(q).join(','));
   download(`魔王出沒_${bossName()}_${ui.month}.csv`, '﻿' + [head.map(q).join(','), ...rows].join('\r\n'), 'text/csv;charset=utf-8');
 }
@@ -1192,16 +1311,17 @@ function renderSettings() {
     <div class="card">
       <h2>帳號</h2>
       ${ui.user
-        ? `<div class="row"><span class="small">${esc(account.email)}${ui.isEditor ? '' : '<br><span class="muted">這個帳號沒有編輯權限</span>'}</span><span class="spacer"></span>
-            ${ui.isEditor ? `<button class="btn sm" id="toggle-view">${E ? '👀 切到觀戰' : '✏️ 切回 GM'}</button>` : ''}<button class="btn sm" id="logout">登出</button></div>
-          ${ui.isEditor && !E ? '<div class="small muted" style="margin-top:8px">目前是觀戰模式，編輯按鈕都已隱藏，避免誤觸</div>' : ''}`
+        ? `<div class="row"><span class="small">${esc(account.email)}<br><span class="muted">${ui.isEditor ? 'GM：可以記錄、修改與刪除' : '冒險者：可以提供情報與修改，不能刪除'}</span></span><span class="spacer"></span>
+            <button class="btn sm" id="toggle-view">${ui.canRecord ? '👀 切到觀戰' : '✏️ 切回記錄'}</button><button class="btn sm" id="logout">登出</button></div>
+          ${ui.isEditor ? `<div class="row" style="margin-top:10px"><span class="small muted">已刪除的紀錄只是隱藏，資料都還在</span><span class="spacer"></span><button class="btn sm" id="toggle-hidden">${ui.showHidden ? '🙈 不顯示已隱藏' : '👁 顯示已隱藏'}</button></div>` : ''}
+          ${ui.user && !ui.canRecord ? '<div class="small muted" style="margin-top:8px">目前是觀戰模式，編輯按鈕都已隱藏，避免誤觸</div>' : ''}`
         : `<div class="row"><span class="small muted">目前是觀戰模式，只能看不能改</span><span class="spacer"></span><button class="btn sm primary" id="login">🔑 登入</button></div>`}
     </div>
 
     ${E ? `<div class="card">
       <h2>魔王名單</h2>
-      ${DB.bosses.length ? `<ul class="list">${DB.bosses.map((b) => `<li><span><span class="lv" style="margin:0 6px 0 0">Lv.${b.level}</span>${esc(b.name)}${b.note ? `<span class="muted small">・${esc(b.note.split('\n')[0])}</span>` : ''}</span>
-        <span class="spacer"></span><button class="btn sm" data-boss-edit="${esc(b.id)}">編輯</button></li>`).join('')}</ul>` : '<div class="muted small">還沒有魔王</div>'}
+      ${visibleBosses().length ? `<ul class="list">${visibleBosses().map((b) => `<li><span><span class="lv" style="margin:0 6px 0 0">Lv.${b.level}</span>${esc(b.name)}${b.note ? `<span class="muted small">・${esc(b.note.split('\n')[0])}</span>` : ''}</span>
+        <span class="spacer"></span>${b.deleted ? '<span class="gone-tag">已隱藏</span>' : `<button class="btn sm" data-boss-edit="${esc(b.id)}">編輯</button>`}</li>`).join('')}</ul>` : '<div class="muted small">還沒有魔王</div>'}
       <button class="btn sm" id="boss-add2" style="margin-top:10px">＋ 新增魔王</button>
     </div>
 
@@ -1225,7 +1345,7 @@ function renderSettings() {
 
     ${E ? `<div class="card">
       <h2>存檔</h2>
-      <div class="small muted" style="margin-bottom:10px">存檔在雲端（${DB.events.length} 筆日誌、${DB.leaves.length} 筆閉關），所有人打開網站看到的都是這份。「讀取存檔」會取代雲端上的全部資料，讀取前請先下載目前的存檔備份。</div>
+      <div class="small muted" style="margin-bottom:10px">存檔在雲端（${savedCount('events')} 筆日誌、${savedCount('leaves')} 筆閉關），所有人打開網站看到的都是這份。「讀取存檔」會取代雲端上的全部資料，讀取前請先下載目前的存檔備份。</div>
       ${legacy ? `<div class="banner" style="box-shadow:none;margin-bottom:12px"><span class="small">這台裝置還有接雲端前的舊存檔（${legacy} 筆），上傳後歸給 ${esc(bossName())}</span><span class="spacer"></span><button class="btn sm" id="bk-legacy">⬆️ 上傳</button></div>` : ''}
       <div class="row wrap-row">
         <button class="btn sm" id="bk-export">💾 下載存檔</button>
@@ -1234,6 +1354,22 @@ function renderSettings() {
         <button class="btn sm danger" id="bk-clear">🗑️ 刪除存檔</button>
       </div>
     </div>` : ''}
+    ${ui.isEditor ? `<div class="card">
+      <h2>冒險者註冊</h2>
+      <div class="row"><span class="small">${DB.settings.signupOpen ? '🟢 開放中：登入視窗會顯示「建立帳號」' : '🔒 已關閉：新帳號只能觀戰'}</span><span class="spacer"></span>
+        <button class="btn sm ${DB.settings.signupOpen ? '' : 'primary'}" id="toggle-signup">${DB.settings.signupOpen ? '關閉註冊' : '開放註冊'}</button></div>
+      <div class="small muted" style="margin-top:8px">已註冊的冒險者不受影響。若想連帳號都不讓人建立，可到
+        <a href="https://console.firebase.google.com/project/maou-log-jt2c4/authentication/settings" target="_blank" rel="noopener" style="color:var(--cyan)">Firebase 主控台 → 使用者動作</a>
+        取消勾選「啟用建立功能（註冊）」（取消後網站上的「建立帳號」也會失敗）。</div>
+    </div>` : ''}
+    <div class="card">
+      <h2>冒險者清單</h2>
+      ${adventurerList()}
+    </div>
+    <div class="card">
+      <h2>新手教學</h2>
+      <div class="row"><span class="small muted">忘記怎麼玩？再看一次冒險指南</span><span class="spacer"></span><button class="btn sm" id="replay-tutorial">📖 新手教學</button></div>
+    </div>
     <div class="card">
       <h2>外觀（電腦版）</h2>
       <div class="chips" id="skins">
@@ -1246,9 +1382,17 @@ function renderSettings() {
   const root = $('#view-settings');
   $('#cal-refresh').onclick = refreshCalendar;
   $$('#skins [data-skin]').forEach((b) => b.onclick = () => setSkin(b.dataset.skin));
+  $('#replay-tutorial').onclick = () => startTutorial('viewer');
   $('#login')?.addEventListener('click', openLogin);
   $('#logout')?.addEventListener('click', () => account.logout());
   $('#toggle-view')?.addEventListener('click', toggleViewOnly);
+  $('#toggle-hidden')?.addEventListener('click', toggleShowHidden);
+  $('#toggle-signup')?.addEventListener('click', async () => {
+    if (!ui.isEditor) return;
+    await store.setSignupOpen(!DB.settings.signupOpen);
+    toast(DB.settings.signupOpen ? '已開放註冊' : '已關閉註冊');
+    renderSettings();
+  });
   if (!E) return;
   $$('[data-boss-edit]', root).forEach((b) => b.onclick = () => openBossEditor(DB.bosses.find((x) => x.id === b.dataset.bossEdit)));
   $('#boss-add2').onclick = () => openBossEditor();
@@ -1270,7 +1414,7 @@ function renderSettings() {
   };
   $('#bk-clear').onclick = (e) => {
     const b = e.currentTarget;
-    if (b.dataset.armed) { store.clearAll().then(() => { toast('已刪除'); render(); }, (err) => toast('刪除失敗：' + (err.code || err.message))); return; }
+    if (b.dataset.armed) { store.clearAll().then(() => { toast('已刪除（資料仍保留在雲端）'); render(); }, (err) => toast('刪除失敗：' + (err.code || err.message))); return; }
     b.dataset.armed = '1';
     b.textContent = '再按一次確定刪除';
     setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '🗑️ 刪除存檔'; } }, 4000);
@@ -1289,6 +1433,143 @@ async function refreshCalendar() {
   renderSettings();
 }
 
+// ---------- 新手教學（冒險指南）----------
+// 每一步：target = 要打亮的元素；tab = 先切到哪一頁；找不到 target 的步驟自動跳過
+const TUTORIAL_KEY = { viewer: 'maou-log:tutorial', gm: 'maou-log:tutorial-gm' };
+function tutorialSteps(kind) {
+  const viewer = [
+    { text: '歡迎來到「魔王出沒紀錄」！我是嚮導，帶你走一圈。這裡記錄每隻魔王每天的出沒動態。' },
+    { target: '#boss-bar', text: '先從這裡選一隻要觀戰的魔王。沒有選魔王的話，什麼資料都看不到喔。' },
+    { tab: 'record', target: '#view-record .now', text: '這裡是魔王目前的狀態：現在在做什麼、幾點上線、今天上線多久。' },
+    { tab: 'record', target: '#share-now', text: '按這顆按鈕，就能把魔王的動態傳給你的 LINE 好友。電腦版會改成複製文字，貼到 LINE 就好。' },
+    { target: 'nav.tabs', text: '下方切換頁面：「地圖」看每天的狀況，「成就」看遲到、早退等統計，「選單」有更多設定。' },
+    { target: '#online', text: '右上角是目前同時在線的冒險者人數，沒登入的也算。' },
+    { target: '.controls', text: '電腦版可以用掌機按鍵或鍵盤操作：← → 換頁、Shift 換魔王、Z 分享、X 關閉。' },
+  ];
+  const gm = [
+    { text: '登入成功！接下來介紹提供情報（記錄魔王）的方法。' },
+    { rec: true, tab: 'record', target: '#offsets', text: '「時光機」：如果晚了幾分鐘才記錄，先選「5 分前」之類的時間再按狀態。' },
+    { rec: true, tab: 'record', target: '#view-record .status-grid', text: '看到魔王在做什麼，就按對應的狀態。記錄後可以順手廣播給隊友。' },
+    { rec: true, tab: 'record', target: '#add-leave', text: '魔王請假就登記「閉關」，可以是全天、半天或自訂時段，也能事先登記。' },
+    { target: '#role', text: '點這個徽章可以切到觀戰模式，把編輯按鈕藏起來，避免誤觸。記錯的情報可以修改，刪除則交給 GM。' },
+  ];
+  const end = { text: '以上就是冒險指南！隨時可以到「選單 → 📖 新手教學」再看一次。祝冒險愉快！' };
+  if (kind === 'gm') return [...gm, end];
+  return [...viewer, ...(ui.canRecord ? gm.slice(1) : []), end];
+}
+
+const tut = { steps: [], i: 0, kind: 'viewer', typing: null, hasRecord: false };
+const tutOpen = () => !$('#tutorial').hidden;
+
+function startTutorial(kind = 'viewer') {
+  if (sheet.open) closeSheet();
+  tut.steps = tutorialSteps(kind);
+  tut.kind = kind;
+  tut.hasRecord = false; // 真的顯示過記錄步驟才算看過（見 showStep）
+  tut.i = 0;
+  $('#tutorial').hidden = false;
+  showStep(0, 1);
+}
+
+function endTutorial() {
+  clearInterval(tut.typing);
+  tut.typing = null;
+  $('#tutorial').hidden = true;
+  storage.set(TUTORIAL_KEY[tut.kind], 'done');
+  if (tut.hasRecord) storage.set(TUTORIAL_KEY.gm, 'done'); // 真的看過記錄方法才標記
+}
+
+// dir：往前（1）或往後（-1）找下一個畫面上存在的步驟
+function showStep(i, dir) {
+  while (i >= 0 && i < tut.steps.length) {
+    const step = tut.steps[i];
+    if (step.tab && ui.tab !== step.tab) goTab(step.tab);
+    const el = step.target ? $(step.target) : null;
+    if (!step.target || (el && el.offsetParent !== null)) break;
+    i += dir;
+  }
+  if (i < 0) { showStep(0, 1); return; }
+  if (i >= tut.steps.length) { endTutorial(); return; }
+  tut.i = i;
+  const step = tut.steps[i];
+  if (step.rec) tut.hasRecord = true;
+  const el = step.target ? $(step.target) : null;
+  if (el && $('#scroll').contains(el)) el.scrollIntoView({ block: 'center' });
+  placeSpot(el);
+  $('#tut-count').textContent = `${i + 1} / ${tut.steps.length}`;
+  $('#tut-prev').disabled = i === 0;
+  $('#tut-next').textContent = i === tut.steps.length - 1 ? '開始冒險 ▶' : '下一步 ▶';
+  typeText(step.text);
+}
+
+// 打亮目標；沒有目標時只顯示對話框（整個螢幕變暗）
+function placeSpot(el) {
+  const spot = $('#tut-spot');
+  const box = $('#tut-box');
+  if (!el) { spot.style.cssText = 'left:50%;top:40%;width:0;height:0'; box.dataset.pos = 'bottom'; return; }
+  const scr = $('#screen').getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const pad = 6;
+  const left = Math.max(r.left - scr.left - pad, 2);
+  const top = Math.max(r.top - scr.top - pad, 2);
+  const width = Math.min(r.width + pad * 2, scr.width - left - 2);
+  const height = Math.min(r.height + pad * 2, scr.height - top - 2);
+  spot.style.cssText = `left:${left}px;top:${top}px;width:${width}px;height:${height}px`;
+  // 目標在下半部就把對話框放上面，避免擋住
+  box.dataset.pos = top + height / 2 > scr.height / 2 ? 'top' : 'bottom';
+}
+
+// 打字機效果；打字中再按「下一步」會先把字打完
+function typeText(text) {
+  clearInterval(tut.typing);
+  const out = $('#tut-text');
+  const chars = Array.from(text);
+  let n = 0;
+  out.textContent = '';
+  out.dataset.full = text;
+  tut.typing = setInterval(() => {
+    out.textContent = chars.slice(0, ++n).join('');
+    if (n >= chars.length) { clearInterval(tut.typing); tut.typing = null; }
+  }, 18);
+}
+function tutNext() {
+  if (tut.typing) { clearInterval(tut.typing); tut.typing = null; $('#tut-text').textContent = $('#tut-text').dataset.full; return; }
+  showStep(tut.i + 1, 1);
+}
+function tutPrev() { showStep(tut.i - 1, -1); }
+
+$('#tut-next').addEventListener('click', tutNext);
+$('#tut-prev').addEventListener('click', tutPrev);
+$('#tut-skip').addEventListener('click', endTutorial);
+window.addEventListener('resize', () => { if (tutOpen()) showStep(tut.i, 1); });
+
+// 第一次來的冒險者自動開始；GM 第一次登入時補教編輯功能
+function maybeStartTutorial() {
+  if (tutOpen() || !document.body.classList.contains('ready')) return;
+  // 開站與登入都會呼叫；計時器觸發時再檢查一次，避免教學被開兩次
+  const later = (kind) => setTimeout(() => { if (!tutOpen()) startTutorial(kind); }, 400);
+  if (storage.get(TUTORIAL_KEY.viewer) !== 'done') later('viewer');
+  else if (ui.canRecord && storage.get(TUTORIAL_KEY.gm) !== 'done') later('gm');
+}
+
+// 存檔裡會有的筆數：沒被隱藏、而且魔王也沒被隱藏
+function savedCount(name) {
+  const alive = new Set(DB.bosses.filter((b) => !b.deleted).map((b) => b.id));
+  return DB[name].filter((x) => !x.deleted && alive.has(x.boss)).length;
+}
+
+// ---------- 冒險者清單（只顯示去識別化的 email）----------
+function adventurerList() {
+  const list = [...DB.adventurers].map((a) => ({ ...a, online: ui.onlineUids.has(a.uid), gm: isEditorUid(a.uid) }))
+    .sort((x, y) => (y.online - x.online) || (y.gm - x.gm) || String(x.masked).localeCompare(String(y.masked)));
+  const rows = list.map((a) => `<li data-adv="${esc(a.uid)}"><span class="dot" style="background:${a.online ? 'var(--green)' : 'var(--slate)'}"></span>
+    <span>${esc(a.masked)}${a.gm ? ' <span class="role gm" style="margin-left:4px">GM</span>' : ''}${a.uid === ui.user?.uid ? ' <span class="muted small">（你）</span>' : ''}</span>
+    <span class="spacer"></span><span class="small ${a.online ? '' : 'muted'}">${a.online ? '在線' : '離線'}</span></li>`).join('');
+  const online = list.filter((a) => a.online).length;
+  return `<div class="small muted" style="margin-bottom:6px">${list.length} 位冒險者，${online} 位在線${ui.anonOnline ? `；另有 ${ui.anonOnline} 位未登入的觀戰者` : ''}</div>
+    ${rows ? `<ul class="list">${rows}</ul>` : '<div class="muted small">還沒有冒險者註冊</div>'}`;
+}
+
 // ---------- 外觀（電腦版的機種）----------
 const SKINS = [['boy', '🎮 直式掌機'], ['wide', '🕹️ 橫式掌機'], ['none', '🖥️ 無外殼']];
 function setSkin(skin) {
@@ -1302,6 +1583,9 @@ const AUTH_ERRORS = {
   'auth/invalid-credential': '帳號或密碼錯誤',
   'auth/wrong-password': '帳號或密碼錯誤',
   'auth/user-not-found': '帳號或密碼錯誤',
+  'auth/weak-password': '密碼至少要 6 個字',
+  'auth/email-already-in-use': '這個 Email 已經註冊過，請直接登入',
+  'auth/admin-restricted-operation': '目前沒有開放註冊',
   'auth/invalid-email': 'Email 格式不正確',
   'auth/missing-password': '請輸入密碼',
   'auth/too-many-requests': '嘗試太多次，請稍後再試',
@@ -1318,10 +1602,10 @@ function openLogin() {
       <label class="f"><span>密碼</span><input type="password" id="lg-pass" autocomplete="current-password"></label>
       <div class="login-err" id="lg-err"></div>
       <div class="sheet-actions" style="margin-top:0">
-        <button type="button" class="btn" id="lg-cancel">取消</button>
-        <button type="submit" class="btn primary">登入</button>
+        ${DB.settings.signupOpen ? '<button type="button" class="btn" id="lg-signup">建立帳號</button>' : ''}
+        <button type="submit" class="btn primary" ${DB.settings.signupOpen ? '' : 'style="grid-column:1 / -1"'}>登入</button>
       </div>
-      <div style="text-align:center;margin-top:10px"><button type="button" class="linkbtn" id="lg-reset">忘記密碼</button></div>
+      <div style="text-align:center;margin-top:6px"><button type="button" class="linkbtn" id="lg-reset">忘記密碼</button><button type="button" class="linkbtn" id="lg-cancel">取消</button></div>
     </form>`);
   const val = () => [$('#lg-email').value.trim(), $('#lg-pass').value];
   const err = (m) => { $('#lg-err').textContent = m; };
@@ -1329,6 +1613,7 @@ function openLogin() {
   const run = async (fn) => { err(''); busy(true); try { await fn(); } catch (e) { err(authMessage(e)); } busy(false); };
   $('#login-form').onsubmit = (e) => { e.preventDefault(); run(() => account.login(...val())); };
   $('#lg-cancel').onclick = closeSheet;
+  $('#lg-signup')?.addEventListener('click', () => run(() => account.signup(...val())));
   $('#lg-reset').onclick = () => {
     const [email] = val();
     if (!email) { err('請先輸入 Email'); return; }
@@ -1344,35 +1629,51 @@ ensureCalendar(y);
 ensureCalendar(y + 1);
 
 const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-store.onChange(() => { if (!typing()) render(); });
+store.onChange(() => {
+  // 冒險者清單同步到了、身分剛變成冒險者時（例如剛註冊），補教記錄方法
+  const before = ui.canRecord;
+  syncRoles();
+  if (!typing()) render();
+  if (!before && ui.canRecord) maybeStartTutorial();
+});
 store.onError((err, kind) => toast(`${kind === 'read' ? '雲端同步失敗' : '雲端存檔失敗'}：${err.code || err.message}`));
+// GM 專用：顯示已隱藏（刪除）的紀錄
+function toggleShowHidden() {
+  ui.showHidden = !ui.showHidden;
+  toast(ui.showHidden ? '👁 顯示已隱藏的紀錄' : '🙈 不顯示已隱藏的紀錄');
+  render();
+}
+
 // 編輯者可以切到觀戰模式（隱藏所有編輯按鈕），避免誤觸
 function toggleViewOnly() {
   ui.viewOnly = !ui.viewOnly;
   storage.set('maou-log:view-only', ui.viewOnly ? '1' : '0');
-  ui.canEdit = ui.isEditor && !ui.viewOnly;
+  syncRoles();
   if (sheet.open) closeSheet();
-  toast(ui.canEdit ? '✏️ GM 模式：可以記錄與修改' : '👀 觀戰模式：只看不改');
+  toast(ui.canRecord ? '✏️ 記錄模式：可以提供情報與修改' : '👀 觀戰模式：只看不改');
   render();
 }
 
 account.onUser((user, isEditor) => {
   ui.user = user;
   ui.isEditor = isEditor;
-  ui.canEdit = isEditor && !ui.viewOnly;
+  syncRoles();
   if (sheet.open) closeSheet();
-  if (user && !isEditor) toast('這個帳號沒有編輯權限，目前是觀戰模式');
   render();
+  maybeStartTutorial();
 });
-watchOnline((n) => {
+watchOnline((n, uids, anon) => {
   ui.online = n;
+  ui.onlineUids = uids;
+  ui.anonOnline = anon;
   const el = $('#online');
   if (el && n != null) el.textContent = `🟢 在線 ${n}`;
-  else render();
+  if (!el || n == null || ui.tab === 'settings') { if (!typing()) render(); } // 冒險者清單的在線狀態、讀取失敗時都要重繪
 });
 store.ready.then(() => {
   document.body.classList.add('ready');
   render();
+  maybeStartTutorial();
 });
 setInterval(() => { if (!sheet.open && !typing()) render(); }, 30000);
 </script>

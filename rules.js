@@ -11,6 +11,18 @@ export const SCHEDULE = {
   dailyMinutes: 8 * 60,   // 每日表定工時（不含午休）
 };
 
+// 冒險者清單用：email 去識別化，只留帳號前 2 個字（太短留 1 個）與網域第一個字＋後綴
+// 例：john@gmail.com → jo***@g***.com；ab@yahoo.com.tw → a***@y***.com.tw
+export function maskEmail(email) {
+  const [local = '', domain = ''] = String(email || '').toLowerCase().split('@');
+  if (!local || !domain) return '***';
+  const chars = Array.from(local); // 以字元計算，emoji 也算一個字
+  const keep = chars.slice(0, chars.length > 2 ? 2 : 1).join('');
+  const dot = domain.indexOf('.');
+  const tail = dot > 0 ? domain.slice(dot) : '';
+  return `${keep}***@${Array.from(domain)[0]}***${tail}`;
+}
+
 // 魔王（觀察對象）：用等級與名稱區分，例如 Lv.30 魔王、Lv.50 魔王
 export function bossLabel(boss) {
   return boss ? `Lv.${boss.level} ${boss.name}` : '魔王';

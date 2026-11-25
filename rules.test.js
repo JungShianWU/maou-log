@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, parseHHMM as t,
+  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, parseHHMM as t,
 } from './rules.js';
 
 const at = (date, hhmm) => taipeiMs(date, hhmm);
@@ -173,6 +173,15 @@ test('今天冒險中不算進情報完整度的分母', () => {
 test('bossLabel 與範本的 {魔王}', () => {
   assert.equal(bossLabel({ level: 30, name: '魔王' }), 'Lv.30 魔王');
   assert.equal(renderTemplate(DEFAULT_TEMPLATES.lunch, { 魔王: 'Lv.50 魔王', 時間: '12:00', 旁白: '' }), '🍖 Lv.50 魔王 吃飯中（12:00）');
+});
+
+test('maskEmail：只留前幾個字，看不出完整 email', () => {
+  assert.equal(maskEmail('john.smith@gmail.com'), 'jo***@g***.com');
+  assert.equal(maskEmail('AB@Yahoo.com.tw'), 'a***@y***.com.tw');
+  assert.equal(maskEmail('x@localhost'), 'x***@l***');
+  assert.equal(maskEmail(''), '***');
+  assert.equal(maskEmail('not-an-email'), '***');
+  assert.equal(maskEmail('😀a@gmail.com'), '😀***@g***.com'); // 只有 2 個字元，只留 1 個
 });
 
 test('leaveSpanText', () => {

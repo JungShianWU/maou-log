@@ -5,6 +5,24 @@ service cloud.firestore {
     function isEditor() {
       return request.auth != null && request.auth.uid in ['F6SSiFKOSzSMDPS91GGHJICiHUg2'];
     }
+    // 冒險者：已登記在冒險者清單的帳號（GM 一律算）；可以提供情報（記錄狀態、閉關、新增／編輯魔王），但不能刪除（隱藏）
+    // 關閉註冊時新帳號無法登記，所以就算繞過畫面建了帳號也只能觀戰
+    function isMember() {
+      return request.auth != null
+        && (isEditor() || exists(/databases/$(database)/documents/adventurers/$(request.auth.uid)));
+    }
+    // 是否開放註冊（GM 在網站選單切換，存在 boards/main.signupOpen）
+    function signupOpen() {
+      return get(/databases/$(database)/documents/boards/main).data.get('signupOpen', false) == true;
+    }
+    // 只有 GM 能把資料標記為隱藏
+    function hideAllowed(d) {
+      return isEditor() || d.get('deleted', false) == false;
+    }
+    // 已經被隱藏的資料只有 GM 能改（冒險者不能偷偷還原）
+    function notHiddenOrEditor() {
+      return isEditor() || resource.data.get('deleted', false) == false;
+    }
     function isText(v, max) {
       return v is string && v.size() <= max;
     }
@@ -14,54 +32,142 @@ service cloud.firestore {
     function isHHMM(v) {
       return v is string && v.matches('^[0-9]{2}:[0-9]{2}$');
     }
+    // 共通欄位：
+    //   by       最後寫入者，必須是本人
+    //   loggedAt 按下記錄的時間（選填，舊資料沒有）
+    //   deleted / deletedAt  刪除只做標記（畫面不顯示），資料保留在資料庫
+    function common(d) {
+      return d.by == request.auth.uid
+        && (!('loggedAt' in d) || d.loggedAt is number)
+        && (!('deleted' in d) || d.deleted is bool)
+        && (!('deletedAt' in d) || d.deletedAt is number);
+    }
+    // 情報提供者 reporter：新增時若有填必須是本人（舊版程式不帶這個欄位，仍可新增；GM 讀取存檔時可保留原本的提供者）
+    function reporterOnCreate() {
+      return !('reporter' in request.resource.data) || request.resource.data.reporter == request.auth.uid || isEditor();
+    }
+    // 之後修改、隱藏都不能換人；舊資料沒有 reporter 時，只能補上原本的記錄者 by
+    function reporterUnchanged() {
+      return request.resource.data.get('reporter', '') == resource.data.get('reporter', '')
+        || (!('reporter' in resource.data) && request.resource.data.get('reporter', '') == resource.data.get('by', ''));
+    }
+    // 修改歷史 history：新增時沒有（GM 讀取存檔時可保留原本的歷史）；之後每次修改（含隱藏）都必須「附加一筆」，舊的不能改、不能刪
+    function noHistory() {
+      return !('history' in request.resource.data) || request.resource.data.history.size() == 0
+        || (isEditor() && request.resource.data.history is list && request.resource.data.history.size() <= 50);
+    }
+    function historyAppended() {
+      let old = resource.data.get('history', []);
+      let h = request.resource.data.get('history', []);
+      return h is list && h.size() == old.size() + 1
+        && (h.size() <= 50 || h[old.size()].action == 'hide') // 修改上限 50 次；隱藏不受限
+        && (old.size() == 0 || h[0:old.size()] == old)
+        && h[old.size()].action in ['edit', 'hide']
+        // 「隱藏」必須真的設成隱藏，「修正」不能是隱藏狀態（避免假裝隱藏來繞過上限）
+        && ((h[old.size()].action == 'hide') == (request.resource.data.get('deleted', false) == true))
+        && h[old.size()].by == request.auth.uid
+        && h[old.size()].t is number;
+    }
+    // 修改時不能換魔王、不能改記錄時間
+    function ownerAndLoggedAtUnchanged() {
+      return request.resource.data.boss == resource.data.boss
+        && request.resource.data.get('loggedAt', null) == resource.data.get('loggedAt', null);
+    }
+    // 附加的那一筆必須是資料庫裡「修改前」的真實內容
+    function eventHistoryTruthful() {
+      let e = request.resource.data.history[resource.data.get('history', []).size()];
+      return e.keys().hasOnly(['at', 'status', 'note', 'action', 'by', 't'])
+        && e.at == resource.data.at && e.status == resource.data.status
+        && e.note == resource.data.get('note', '');
+    }
+    function leaveHistoryTruthful() {
+      let e = request.resource.data.history[resource.data.get('history', []).size()];
+      return e.keys().hasOnly(['date', 'kind', 'type', 'note', 'start', 'end', 'action', 'by', 't'])
+        && e.date == resource.data.date && e.kind == resource.data.kind && e.type == resource.data.type
+        && e.note == resource.data.get('note', '')
+        && e.get('start', null) == resource.data.get('start', null)
+        && e.get('end', null) == resource.data.get('end', null);
+    }
 
-    // 公開看板：任何人都能看（不用登入），只有編輯者能改
+    // 冒險者清單：任何人可看；每個帳號只能登記自己，且只能存去識別化的 email（例：jo***@g***.com）
+    match /adventurers/{uid} {
+      function validAdventurer() {
+        return request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['masked', 'joinedAt'])
+        && request.resource.data.joinedAt is number
+        && request.resource.data.masked is string
+        && request.resource.data.masked.size() <= 80
+        && request.resource.data.masked.matches('^([^@]{1,2}[*]{3}@[^@][*]{3}([.][^@.]+)*|[*]{3})$');
+      }
+      allow read: if true;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+      allow create: if validAdventurer() && (signupOpen() || isEditor()); // 關閉註冊時新帳號不能登記
+      allow update: if validAdventurer();
+    }
+
+    // 公開看板：任何人都能看（不用登入）；設定（範本、休戰日）只有 GM 能改；
+    // 魔王、日誌、閉關登入的冒險者都能新增、修改；隱藏只有 GM；資料不能真的刪除
     match /boards/{board} {
       allow read: if true;
-      allow delete: if isEditor();
+      allow delete: if false;
       allow create, update: if isEditor() && board == 'main'
-        && request.resource.data.keys().hasOnly(['templates', 'overrides'])
+        && request.resource.data.keys().hasOnly(['templates', 'overrides', 'signupOpen'])
+        && request.resource.data.get('signupOpen', false) is bool
         && request.resource.data.get('templates', {}) is map
         && request.resource.data.get('overrides', {}) is map;
 
       match /bosses/{id} {
+        function validBoss() {
+          return isMember() && board == 'main' && hideAllowed(request.resource.data)
+            && request.resource.data.keys().hasOnly(['level', 'name', 'note', 'by', 'deleted', 'deletedAt'])
+            && common(request.resource.data)
+            && request.resource.data.level is int
+            && request.resource.data.level >= 1 && request.resource.data.level <= 999
+            && isText(request.resource.data.name, 20) && request.resource.data.name.size() >= 1
+            && isText(request.resource.data.note, 200);
+        }
         allow read: if true;
-        allow delete: if isEditor();
-        allow create, update: if isEditor() && board == 'main'
-          && request.resource.data.keys().hasOnly(['level', 'name', 'note', 'by'])
-          && request.resource.data.by == request.auth.uid
-          && request.resource.data.level is int
-          && request.resource.data.level >= 1 && request.resource.data.level <= 999
-          && isText(request.resource.data.name, 20) && request.resource.data.name.size() >= 1
-          && isText(request.resource.data.note, 200);
+        allow delete: if false;
+        allow create: if validBoss();
+        allow update: if validBoss() && notHiddenOrEditor();
       }
 
       match /events/{id} {
+        function validEvent() {
+          return isMember() && board == 'main' && hideAllowed(request.resource.data)
+            && request.resource.data.keys().hasOnly(['boss', 'at', 'status', 'note', 'loggedAt', 'reporter', 'by', 'deleted', 'deletedAt', 'history'])
+            && common(request.resource.data)
+            && isBossRef(request.resource.data.boss)
+            && request.resource.data.at is number
+            && request.resource.data.status in ['work', 'remote', 'makeup', 'lunch', 'away', 'back', 'nap', 'off']
+            && isText(request.resource.data.note, 100);
+        }
         allow read: if true;
-        allow delete: if isEditor();
-        allow create, update: if isEditor() && board == 'main'
-          && request.resource.data.keys().hasOnly(['boss', 'at', 'status', 'note', 'by'])
-          && isBossRef(request.resource.data.boss)
-          && request.resource.data.by == request.auth.uid
-          && request.resource.data.at is number
-          && request.resource.data.status in ['work', 'remote', 'makeup', 'lunch', 'away', 'back', 'nap', 'off']
-          && isText(request.resource.data.note, 100);
+        allow delete: if false;
+        allow create: if validEvent() && reporterOnCreate() && noHistory();
+        allow update: if validEvent() && notHiddenOrEditor() && reporterUnchanged() && ownerAndLoggedAtUnchanged()
+          && historyAppended() && eventHistoryTruthful();
       }
 
       match /leaves/{id} {
+        function validLeave() {
+          return isMember() && board == 'main' && hideAllowed(request.resource.data)
+            && request.resource.data.keys().hasOnly(['boss', 'date', 'kind', 'type', 'note', 'start', 'end', 'loggedAt', 'reporter', 'by', 'deleted', 'deletedAt', 'history'])
+            && common(request.resource.data)
+            && isBossRef(request.resource.data.boss)
+            && request.resource.data.date is string
+            && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && request.resource.data.kind in ['full', 'am', 'pm', 'custom']
+            && isText(request.resource.data.type, 30)
+            && isText(request.resource.data.note, 100)
+            && (request.resource.data.kind != 'custom'
+                || (isHHMM(request.resource.data.start) && isHHMM(request.resource.data.end)));
+        }
         allow read: if true;
-        allow delete: if isEditor();
-        allow create, update: if isEditor() && board == 'main'
-          && request.resource.data.keys().hasOnly(['boss', 'date', 'kind', 'type', 'note', 'start', 'end', 'by'])
-          && isBossRef(request.resource.data.boss)
-          && request.resource.data.by == request.auth.uid
-          && request.resource.data.date is string
-          && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          && request.resource.data.kind in ['full', 'am', 'pm', 'custom']
-          && isText(request.resource.data.type, 30)
-          && isText(request.resource.data.note, 100)
-          && (request.resource.data.kind != 'custom'
-              || (isHHMM(request.resource.data.start) && isHHMM(request.resource.data.end)));
+        allow delete: if false;
+        allow create: if validLeave() && reporterOnCreate() && noHistory();
+        allow update: if validLeave() && notHiddenOrEditor() && reporterUnchanged() && ownerAndLoggedAtUnchanged()
+          && historyAppended() && leaveHistoryTruthful();
       }
     }
   }
