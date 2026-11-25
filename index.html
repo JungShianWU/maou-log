@@ -1864,6 +1864,7 @@ store.onChange(() => {
   const before = ui.canRecord;
   syncRoles();
   if (!typing() || closedForMe() !== ui.wasClosed) render(); // 網站剛關閉／重新開放時，正在輸入也要立刻切換
+  else if (document.body.classList.contains('ready')) renderClosed(); // 正在輸入：不重畫整頁，但 GM 的「網站關閉中」提示列照樣更新
   if (!before && ui.canRecord) maybeStartTutorial();
 });
 store.onError((err, kind) => toast(`${kind === 'read' ? '雲端同步失敗' : '雲端存檔失敗'}：${err.code || err.message}`));
@@ -1884,10 +1885,14 @@ function toggleViewOnly() {
   render();
 }
 
+// 開站要等資料與「畫面知道你是誰」都好了：GM 重新整理時才不會先閃出關閉畫面
+let authKnown;
+const authKnownP = Promise.race([new Promise((r) => { authKnown = r; }), new Promise((r) => setTimeout(r, 4000))]); // 最多等 4 秒
 account.onUser((user, isEditor) => {
   if (ui.user?.uid !== user?.uid) { ui.visits = null; ui.visitsAt = 0; } // 換人時不沿用上一位 GM 讀到的造訪紀錄
   ui.user = user;
   ui.isEditor = isEditor;
+  authKnown();
   syncRoles();
   if (sheet.open) closeSheet();
   render();
@@ -1901,7 +1906,7 @@ watchOnline((n, uids, anon) => {
   if (el && n != null) el.textContent = `🟢 在線 ${n}`;
   if (!el || n == null || ui.tab === 'settings') { if (!typing()) render(); } // 冒險者清單的在線狀態、讀取失敗時都要重繪
 });
-store.ready.then(() => {
+Promise.all([store.ready, authKnownP]).then(() => {
   document.body.classList.add('ready');
   render();
   maybeStartTutorial();

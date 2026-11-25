@@ -1196,3 +1196,23 @@ test('網站已關閉時 GM 從關閉畫面登入：看得到資料，按鍵在�
   await expect(page.locator('[data-boss]')).toHaveCount(2);
   await expect(page.locator('#toast')).not.toContainText('同步失敗');
 });
+
+test('網站關閉時 GM：輸入中也看到提示列；重新整理不會先閃出關閉畫面', async ({ page, request }) => {
+  await open(page);
+  await login(page, GM);
+  await page.locator('#closed-note').focus(); // GM 正在輸入時有人關閉網站：提示列也要出現
+  await put(request, 'boards/main', { siteOpen: false, closedNote: '' });
+  await expect(page.locator('#closed-banner')).toBeVisible();
+  // 記錄重新整理過程中關閉畫面有沒有出現過
+  await page.addInitScript(() => {
+    new MutationObserver(() => {
+      const el = document.getElementById('closed');
+      if (el && !el.hidden) window.__closedSeen = true;
+    }).observe(document, { subtree: true, childList: true, attributes: true });
+  });
+  await page.reload();
+  await expect(page.locator('body.ready')).toBeAttached();
+  await expect(page.locator('#closed-banner')).toBeVisible();
+  await expect(page.locator('[data-boss]').first()).toBeVisible();
+  expect(await page.evaluate(() => !!window.__closedSeen)).toBe(false);
+});

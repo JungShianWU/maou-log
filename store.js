@@ -208,7 +208,9 @@ function subscribe() {
       // 第一次：先知道網站開不開，再決定要不要讀資料；資料第一批到齊（或不需要讀）時才算開站完成
       const first = !boardLoaded;
       boardLoaded = true;
-      syncData(first ? c : undefined);
+      // 第一次要等登入狀態還原：否則 GM 重新整理時會先被當成觀戰者，閃一下關閉畫面
+      if (first) authReady.then(() => syncData(c));
+      else syncData();
       // 剛開放註冊（或快取的舊設定被伺服器更新）：已登入但還沒登記的帳號補登記
       if (opened && auth.currentUser) registerAdventurer(auth.currentUser).catch((err) => fail(err));
       notify();
@@ -225,7 +227,7 @@ function subscribe() {
         return;
       }
       applyBoard(snap);
-    }, (err) => { boardLoaded = true; syncData(c); fail(err, 'read'); }); // 讀不到看板設定：當作開放照常讀資料（若其實關閉，規則會拒絕）
+    }, (err) => { boardLoaded = true; authReady.then(() => syncData(c)); fail(err, 'read'); }); // 讀不到看板設定：當作開放照常讀資料（若其實關閉，規則會拒絕）
   });
 }
 
@@ -363,6 +365,8 @@ async function doRegister(user) {
 
 export const isEditorUid = (uid) => EDITOR_UIDS.includes(uid);
 
+// 登入狀態還原完成（沒登入也算）；失敗或超過 4 秒照樣繼續，開站不會卡住
+const authReady = Promise.race([auth.authStateReady().catch(() => {}), new Promise((r) => setTimeout(r, 4000))]);
 // 開站就開始同步看板（公開可讀），第一批資料到齊時完成
 const ready = subscribe();
 
