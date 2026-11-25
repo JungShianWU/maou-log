@@ -14,7 +14,10 @@ const NOW = new Date('2026-11-24T09:12:00+08:00');
 const OWNER = { Authorization: 'Bearer owner' }; // 模擬器的管理權限，跳過安全規則
 
 // 直接在模擬器寫入資料（Firestore REST 格式）
-const value = (v) => (typeof v === 'number' ? { integerValue: String(v) } : typeof v === 'boolean' ? { booleanValue: v } : { stringValue: v });
+const value = (v) => (typeof v === 'number' ? { integerValue: String(v) } : typeof v === 'boolean' ? { booleanValue: v }
+  : Array.isArray(v) ? { arrayValue: { values: v.map(value) } }
+    : v && typeof v === 'object' ? { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, value(x)])) } }
+      : { stringValue: v });
 async function put(request, path, data) {
   const fields = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, value(v)]));
   const res = await request.patch(`${DOCS}/${path}`, { headers: OWNER, data: { fields } });
@@ -948,4 +951,49 @@ test('每日上線時刻：範圍大時刻度對齊整點，頭尾都有刻度',
   await tab(page, 'stats');
   const ticks = await page.locator('.arr .axis span').allTextContents();
   expect(ticks).toEqual(['07:00', '08:00', '09:00', '10:00', '11:00']);
+});
+
+test('手機寬度：日誌第一行是時間・狀態・修改（按鈕大小一致），旁白與修正紀錄用滿整列；傳聞一覽不受影響', async ({ page, request }) => {
+  const at = new Date(NOW).getTime() - 60 * 1000;
+  const note = '考績表 開一個下午欸 來整天下午 只處理考績表~ 確實很慎重!';
+  await put(request, 'boards/main/events/long1', { boss: 'b30', at, status: 'rumor', note, by: GM.uid, reporter: GM.uid,
+    history: [{ t: at, by: GM.uid, action: 'edit', at, status: 'back', note }] });
+  await put(request, 'boards/main/events/short1', { boss: 'b30', at: at - 3600 * 1000, status: 'work', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/gone1', { boss: 'b30', at: at - 1800 * 1000, status: 'lunch', note: '', by: GM.uid, deleted: true });
+  await page.setViewportSize({ width: 360, height: 780 });
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+
+  const row = (id) => page.locator('#view-record .list li', { has: page.locator(`[data-edit="${id}"]`) });
+  await row('long1').locator('[data-hist]').click();
+  const b = await row('long1').locator('[data-edit]').boundingBox();
+  const b2 = await row('short1').locator('[data-edit]').boundingBox();
+  const li = await row('long1').boundingBox();
+  const main = await row('long1').locator('.main').boundingBox();
+  const meta = await row('long1').locator('.meta').boundingBox();
+  expect([Math.round(b.width), Math.round(b.height)]).toEqual([Math.round(b2.width), Math.round(b2.height)]); // 每列按鈕一樣大
+  expect(b.width).toBeGreaterThan(b.height); // 不會被擠成直排
+  expect(b.height).toBeGreaterThanOrEqual(36); // 觸控目標
+  expect(b.y).toBeLessThan(meta.y); // 按鈕在第一行
+  expect(Math.abs((b.y + b.height / 2) - (main.y + main.height / 2))).toBeLessThan(10);
+  expect(meta.width).toBeGreaterThan(li.width * 0.95); // 旁白與修正紀錄用滿整列
+  expect((await row('long1').locator('[data-hist]').boundingBox()).height).toBeGreaterThanOrEqual(24);
+  if (process.env.SHOT) { await row('long1').scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.SHOT}/log-360.png` }); }
+
+  // 已隱藏的列：刪除線仍在
+  await tab(page, 'settings');
+  await page.locator('#toggle-hidden').click();
+  await tab(page, 'record');
+  const gone = page.locator('#view-record .list li.gone').first();
+  await expect(gone).toBeVisible();
+  expect(await gone.locator('.main').evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain('line-through');
+
+  // 傳聞一覽：時間在左、內容在右，不重疊
+  await page.locator('#rumor-list').click();
+  const r = page.locator('#sheet .list li').first();
+  const t = await r.locator('.time').boundingBox();
+  const m = await r.locator('.main').boundingBox();
+  expect(t.x + t.width).toBeLessThanOrEqual(m.x);
+  if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}/rumors-360.png` });
 });

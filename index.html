@@ -159,6 +159,7 @@
 
   .list { margin: 0; padding: 0; list-style: none; }
   .list li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 2px dotted var(--slate); }
+  .list li > .btn { flex: none; white-space: nowrap; } /* 修改按鈕不被長文字擠窄 */
   .list li:last-child { border-bottom: 0; }
   .list .time { font-variant-numeric: tabular-nums; color: var(--cyan); width: 48px; flex: none; }
   .list .body { flex: 1; min-width: 0; }
@@ -169,7 +170,7 @@
   .list .meta .reporter, .list .meta .logged { margin-left: 0; }
   .list .meta > :is(.note, .reporter) + :is(.reporter, .logged)::before { content: '・'; }
   .dot { width: 10px; height: 10px; flex: none; }
-  .logged, .reporter { font-size: 11px; color: var(--slate); margin-left: 6px; white-space: nowrap; }
+  .logged, .reporter { font-size: 12px; color: var(--mist); margin-left: 6px; white-space: nowrap; }
   .gone { opacity: .45; }
   .hist-btn { background: none; border: 1px dashed var(--slate); color: var(--cyan); font-size: 11px; padding: 0 5px; margin-left: 6px; cursor: pointer; text-decoration: none; }
   .hist { list-style: none; margin: 6px 0 0; padding: 6px 8px; background: var(--night); border-left: 3px solid var(--cyan); font-size: 12px; color: var(--mist); text-decoration: none; }
@@ -271,6 +272,16 @@
   .var-chip { font-size: 12px; background: var(--night); border: 1px solid var(--slate); padding: 1px 5px; margin: 2px; display: inline-block; color: var(--cyan); }
   @media (max-width: 480px) {
     header.top { flex-wrap: wrap; row-gap: 4px; }
+    /* 日誌列（有色點的列）：第一行「時間・狀態・修改」，旁白與修正紀錄在下面用滿整列寬度 */
+    .list li:has(> .dot):has(> .body) { display: grid; grid-template-columns: 44px 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: center; }
+    .list li:has(> .dot):has(> .body) > .body { display: contents; }
+    .list li:has(> .dot):has(> .body) > .spacer { display: none; }
+    .list li:has(> .dot):has(> .body) > .btn { grid-column: 4; grid-row: 1; }
+    .list li:has(> .dot):has(> .body) .main { grid-column: 3; grid-row: 1; white-space: normal; } /* 閉關時段不被省略號吃掉 */
+    .list li:has(> .dot):has(> .body) .meta { grid-column: 1 / -1; grid-row: 2; }
+    .list li.gone .main, .list li.gone .meta { text-decoration: line-through; }
+    .list li > .btn { min-height: 36px; min-width: 56px; } /* 觸控目標放大，所有列一樣大 */
+    .hist-btn { font-size: 12px; padding: 4px 8px; min-height: 28px; margin-top: 4px; }
     header.top h1 { font-size: 20px; white-space: nowrap; }
     .now .label { font-size: 20px; }
     .now .label .state { display: block; }
