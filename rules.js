@@ -9,6 +9,7 @@ export const SCHEDULE = {
   end: 18 * 60,           // 表定下班 18:00
   span: 9 * 60,           // 到班後 9 小時（含午休）可下班
   dailyMinutes: 8 * 60,   // 每日表定工時（不含午休）
+  observeEnd: 19 * 60,    // 19:00 後就沒人觀察了：今天還沒結束的時段只算到這裡
 };
 
 // 冒險者清單用：email 去識別化，只留帳號前 2 個字（太短留 1 個）與網域第一個字＋後綴
@@ -233,6 +234,11 @@ export function evaluateSchedule(arrival, leaves = []) {
   };
 }
 
+// 目前狀態持續了多久（分鐘）：只算到 19:00（之後沒人觀察）
+export function observedSince(startMin, nowMin) {
+  return Math.max(0, Math.min(nowMin, SCHEDULE.observeEnd) - startMin);
+}
+
 // ---------- 單日評估 ----------
 
 // events: 該日的狀態紀錄 [{ at: ms, status }]，leaves: 該日休假
@@ -263,7 +269,7 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
   for (let i = 0; i < evs.length; i++) {
     const start = minutesOf(evs[i].at);
     let end = i + 1 < evs.length ? minutesOf(evs[i + 1].at) : null;
-    if (end == null && isToday && evs[i].status !== 'off') end = Math.max(start, nowMin);
+    if (end == null && isToday && evs[i].status !== 'off') end = Math.max(start, Math.min(nowMin, SCHEDULE.observeEnd));
     const open = i + 1 >= evs.length && evs[i].status !== 'off';
     result.segments.push({ status: evs[i].status, start, end, open, note: evs[i].note || '' });
   }

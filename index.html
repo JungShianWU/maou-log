@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1a1c2c">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>魔王出沒紀錄</title>
-<script>try { document.documentElement.dataset.skin = localStorage.getItem('maou-log:skin') || 'wide'; } catch { document.documentElement.dataset.skin = 'wide'; }</script>
+<script>try { document.documentElement.dataset.skin = localStorage.getItem('maou-log:skin') || 'none'; } catch { document.documentElement.dataset.skin = 'none'; }</script>
 <style>
   @font-face {
     font-family: 'Cubic11';
@@ -58,7 +58,17 @@
     box-shadow: inset 0 0 0 3px var(--night), 6px 6px 0 #000; padding: 16px; margin-bottom: 18px;
   }
   .card h2 { font-size: 18px; margin: 0 0 12px; color: var(--gold); font-weight: 400; }
-  .card h2::before { content: '▶ '; color: var(--white); }
+  .card h2::before { content: '▶ '; content: '▶ ' / ''; color: var(--white); } /* 第一行給不支援替代文字語法的舊版 Safari */
+  .fold > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 10px; }
+  .fold > summary::-webkit-details-marker { display: none; }
+  .fold > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+  .fold > summary .fold-hint { margin-left: auto; white-space: nowrap; }
+  .fold > summary .fold-hint::after { content: '展開 ▾'; }
+  .fold[open] > summary .fold-hint::after { content: '收起 ▴'; }
+  .fold:not([open]) > summary h2 { margin: 0; }
+  .fold[open] > summary h2::before { content: '▼ '; content: '▼ ' / ''; }
+  .adv-name { min-width: 0; overflow-wrap: anywhere; }
+  .adv-meta { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
   #sprite { display: inline-block; width: 30px; height: 30px; margin-right: 10px; vertical-align: -5px; animation: bob 1.2s steps(2) infinite; }
   #sprite svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
   .lv { font-family: 'Cubic11', ui-monospace, monospace; font-size: 13px; color: var(--cyan); border: 2px solid var(--cyan); padding: 0 5px; margin-left: 8px; vertical-align: 4px; }
@@ -159,7 +169,7 @@
 
   .list { margin: 0; padding: 0; list-style: none; }
   .list li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 2px dotted var(--slate); }
-  .list li > .btn { flex: none; white-space: nowrap; } /* 修改按鈕不被長文字擠窄 */
+  .list li > .btn, .row > .btn { flex: none; white-space: nowrap; } /* 按鈕不被長文字擠窄、不斷行 */
   .list li:last-child { border-bottom: 0; }
   .list .time { font-variant-numeric: tabular-nums; color: var(--cyan); width: 48px; flex: none; }
   .list .body { flex: 1; min-width: 0; }
@@ -274,6 +284,8 @@
     header.top { flex-wrap: wrap; row-gap: 4px; }
     /* 日誌列（有色點的列）：第一行「時間・狀態・修改」，旁白與修正紀錄在下面用滿整列寬度 */
     .list li:has(> .dot):has(> .body) { display: grid; grid-template-columns: 44px 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: center; }
+    .list li:has(> .adv-meta) { flex-wrap: wrap; row-gap: 4px; } /* 冒險者清單：代號與時間放不下時整組換到第二行 */
+    .list li > .adv-meta { margin-left: auto; }
     .list li:has(> .dot):has(> .body) > .body { display: contents; }
     .list li:has(> .dot):has(> .body) > .spacer { display: none; }
     .list li:has(> .dot):has(> .body) > .btn { grid-column: 4; grid-row: 1; }
@@ -460,7 +472,7 @@
 
 <script type="module">
 import * as R from './rules.js';
-import { store, account, loadCalendar, watchOnline, isEditorUid } from './store.js';
+import { store, account, loadCalendar, watchOnline, isEditorUid, loadVisits } from './store.js';
 import { VERSION } from './version.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -634,7 +646,7 @@ function openBossEditor(boss) {
   openSheet(`
     <h3>${boss ? '編輯魔王' : '新增魔王'}</h3>
     <div class="row">
-      <label class="f" style="width:110px"><span>等級</span><input type="text" id="b-level" inputmode="numeric" value="${boss ? boss.level : ''}" placeholder="30"></label>
+      <label class="f" style="width:110px"><span>等級${boss ? '（只能升）' : ''}</span><input type="text" id="b-level" inputmode="numeric" value="${boss ? boss.level : ''}" placeholder="30"></label>
       <label class="f" style="flex:1"><span>名稱</span><input type="text" id="b-name" maxlength="20" value="${esc(boss?.name || '魔王')}"></label>
     </div>
     <label class="f"><span>屬性備註（觀戰者也看得到）</span><textarea id="b-note" maxlength="200" placeholder="例如：愛喝咖啡、週三固定開會">${esc(boss?.note || '')}</textarea></label>
@@ -649,6 +661,7 @@ function openBossEditor(boss) {
       const name = $('#b-name', el).value.trim() || '魔王';
       const note = $('#b-note', el).value.trim();
       if (!Number.isInteger(level) || level < 1 || level > 999) { toast('等級請填 1–999 的整數'); return; }
+      if (boss && level < boss.level) { toast(`等級只能提升，不能低於 Lv.${boss.level}`); return; }
       try {
         if (boss) await store.updateBoss(boss.id, { level, name, note });
         else { const b = await store.addBoss({ level, name, note }); selectBoss(b.id); }
@@ -936,7 +949,9 @@ function renderRecord() {
   const last = latestEvent();
   const cur = last && R.dateKey(last.at) === today ? last : null;
   const st = cur ? R.STATUSES[cur.status] : null;
-  const since = cur ? nowMin() - R.minutesOf(cur.at) : 0;
+  const offNow = cur?.status === 'off'; // 下線多久照實際時間算，不受 19:00 影響
+  const since = !cur ? 0 : offNow ? Math.max(0, nowMin() - R.minutesOf(cur.at)) : R.observedSince(R.minutesOf(cur.at), nowMin());
+  const stopped = !!cur && !offNow && nowMin() > R.SCHEDULE.observeEnd && R.minutesOf(cur.at) < R.SCHEDULE.observeEnd; // 19:00 後沒人觀察，計時停在 19:00
   const missing = findMissingOff();
   const info = dayInfo(today);
   const exp = Math.min(100, (day.workMinutes / (day.requiredMinutes || R.SCHEDULE.dailyMinutes)) * 100);
@@ -960,7 +975,7 @@ function renderRecord() {
         <div class="emoji" style="--c:${st ? st.color : 'var(--white)'}">${st ? st.emoji : (day.state === 'leave' ? '🏝️' : '❔')}</div>
         <div>
           <div class="label"><span class="who">${who}</span> <span class="state">${st ? `<b>${st.label}</b>` : (day.state === 'leave' ? '<b>閉關中</b>' : '尚未上線<span class="blink">_</span>')}</span></div>
-          <div class="muted small num">${cur ? `從 ${R.fmtMin(R.minutesOf(cur.at))} 開始・已 ${R.fmtDuration(since)}` : (info.workday ? '冒險日' : `休戰日${info.reason ? '・' + esc(info.reason) : ''}`)}
+          <div class="muted small num">${cur ? `從 ${R.fmtMin(R.minutesOf(cur.at))} 開始${since || offNow || R.minutesOf(cur.at) < R.SCHEDULE.observeEnd ? `・已 ${R.fmtDuration(since)}` : ''}${stopped ? `（算到 ${R.fmtMin(R.SCHEDULE.observeEnd)}）` : ''}` : (info.workday ? '冒險日' : `休戰日${info.reason ? '・' + esc(info.reason) : ''}`)}
             ${todayLeave ? `<br>閉關：${esc(todayLeave)}` : ''}</div>
         </div>
       </div>
@@ -1263,7 +1278,7 @@ function openDay(date) {
       <div style="margin-top:10px">${timelineHTML(d)}</div>` : ''}
 
     <div class="card" style="margin-top:12px">
-      <div class="row"><h2 style="margin:0">冒險者觀察日誌</h2><span class="spacer"></span>
+      <div class="row wrap-row"><h2 style="margin:0">冒險者觀察日誌</h2><span class="spacer"></span>
         ${canWrite() ? '<button class="btn sm" id="d-add">＋ 補登</button>' : ''}${canWrite() ? '<button class="btn sm" id="d-leave" style="margin-left:6px">＋ 閉關</button>' : ''}</div>
       ${d.events.length || d.leaves.length || hiddenEvents(d.date).length || hiddenLeaves(d.date).length ? eventList(d) : '<div class="muted small" style="margin-top:8px">沒有紀錄</div>'}
     </div>
@@ -1408,13 +1423,14 @@ function renderSettings() {
   const years = Object.keys(ui.calStatus).sort();
   const overrides = Object.entries(DB.settings.overrides).sort();
   const legacy = ui.canEdit && currentBoss() ? store.legacyCount() : 0;
+  refreshVisits();
   const E = ui.canEdit;
   $('#view-settings').innerHTML = `
     <div class="card">
       <h2>帳號</h2>
       ${ui.user
-        ? `<div class="row"><span class="small">${esc(account.email)}<br><span class="muted">${ui.isEditor ? 'GM：可以記錄、修改與刪除' : '冒險者：可以提供情報與修改，不能刪除'}</span></span><span class="spacer"></span>
-            <button class="btn sm" id="toggle-view">${ui.canRecord ? '👀 切到觀戰' : '✏️ 切回記錄'}</button><button class="btn sm" id="logout">登出</button></div>
+        ? `<div class="row wrap-row"><span class="small">${esc(account.email)}<br><span class="muted">${ui.isEditor ? 'GM：可以記錄、修改與刪除' : '冒險者：可以提供情報與修改，不能刪除'}</span></span><span class="spacer"></span>
+            <span class="row" style="margin-left:auto"><button class="btn sm" id="toggle-view">${ui.canRecord ? '👀 切到觀戰' : '✏️ 切回記錄'}</button><button class="btn sm" id="logout">登出</button></span></div>
           ${ui.isEditor ? `<div class="row" style="margin-top:10px"><span class="small muted">已刪除的紀錄只是隱藏，資料都還在</span><span class="spacer"></span><button class="btn sm" id="toggle-hidden">${ui.showHidden ? '🙈 不顯示已隱藏' : '👁 顯示已隱藏'}</button></div>` : ''}
           ${ui.user && !ui.canRecord ? '<div class="small muted" style="margin-top:8px">目前是觀戰模式，編輯按鈕都已隱藏，避免誤觸</div>' : ''}`
         : `<div class="row"><span class="small muted">目前是觀戰模式，只能看不能改</span><span class="spacer"></span><button class="btn sm primary" id="login">🔑 登入</button></div>`}
@@ -1427,13 +1443,13 @@ function renderSettings() {
       <button class="btn sm" id="boss-add2" style="margin-top:10px">＋ 新增魔王</button>
     </div>
 
-    <div class="card">
-      <h2>廣播訊息範本</h2>
+    <details class="card fold" id="tpl-fold" ${ui.tplOpen ? 'open' : ''}>
+      <summary><h2>廣播訊息範本</h2><span class="small muted fold-hint"></span></summary>
       <div class="small muted" style="margin-bottom:10px">可用變數（輸入大括號）：${R.TEMPLATE_VARS.map((v) => `<span class="var-chip">{${v}}</span>`).join('')}</div>
       ${tplKeys.map((k) => `
         <label class="f"><span class="row">${labelOf(k)}<span class="spacer"></span><button class="linkbtn" data-reset="${k}">還原預設</button></span>
           <textarea data-tpl="${k}" rows="3" style="min-height:72px">${esc(DB.settings.templates[k])}</textarea></label>`).join('')}
-    </div>` : ''}
+    </details>` : ''}
 
     <div class="card">
       <h2>休戰日（國定假日）</h2>
@@ -1466,7 +1482,8 @@ function renderSettings() {
     </div>` : ''}
     <div class="card">
       <h2>冒險者清單</h2>
-      ${adventurerList()}
+      <div id="adv-list">${adventurerList()}</div>
+      <div class="small muted" style="margin-top:10px">🔒 本站會記錄每個帳號（未登入則每台裝置）最後一次造訪的時間與 IP 代號：IP 由第三方服務 ipify 取得，只存雜湊後的 4 碼代號，不存完整 IP，只有 GM 看得到。</div>
     </div>
     <div class="card">
       <h2>新手教學</h2>
@@ -1484,6 +1501,7 @@ function renderSettings() {
   const root = $('#view-settings');
   $('#cal-refresh').onclick = refreshCalendar;
   $$('#skins [data-skin]').forEach((b) => b.onclick = () => setSkin(b.dataset.skin));
+  $('#tpl-fold')?.addEventListener('toggle', (e) => { ui.tplOpen = e.target.open; });
   $('#replay-tutorial').onclick = () => startTutorial('viewer');
   $('#login')?.addEventListener('click', openLogin);
   $('#logout')?.addEventListener('click', () => account.logout());
@@ -1661,15 +1679,48 @@ function savedCount(name) {
 }
 
 // ---------- 冒險者清單（只顯示去識別化的 email）----------
+// GM 才讀造訪紀錄（規則也只讓 GM 讀）；最多 1 分鐘重新讀一次
+function refreshVisits() {
+  const uids = DB.adventurers.map((a) => a.uid);
+  const key = uids.join(','); // 冒險者名單變了（剛載入、有人註冊）就重讀
+  if (!ui.isEditor || (ui.visitsAt && Date.now() - ui.visitsAt < 60_000 && ui.visitsKey === key)) return;
+  ui.visitsAt = Date.now();
+  ui.visitsKey = key;
+  loadVisits(uids).then((v) => {
+    ui.visits = v;
+    const el = $('#adv-list'); // 只更新冒險者清單，不重畫整個設定頁（避免洗掉正在輸入的內容）
+    if (el) el.innerHTML = adventurerList();
+  }).catch(() => {});
+}
+// 今天 21:35／昨天 21:35／11/23 21:35
+function fmtWhen(ms) {
+  if (!ms) return '—';
+  const d = R.dateKey(ms);
+  const day = d === todayKey() ? '今天' : d === R.addDays(todayKey(), -1) ? '昨天' : `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+  return `${day} ${R.fmtMin(R.minutesOf(ms))}`;
+}
+const ipChip = (ip) => `<span class="var-chip" title="IP 代號：由 IP 雜湊而來，只用來辨識是否同一來源">#${ip || '----'}</span>`;
+
 function adventurerList() {
-  const list = [...DB.adventurers].map((a) => ({ ...a, online: ui.onlineUids.has(a.uid), gm: isEditorUid(a.uid) }))
+  const gmView = ui.isEditor && ui.visits;
+  const lastOf = (uid) => (gmView ? ui.visits.byUid.get(uid) : null);
+  const list = [...DB.adventurers].map((a) => ({ ...a, online: ui.onlineUids.has(a.uid), gm: isEditorUid(a.uid), last: lastOf(a.uid) }))
     .sort((x, y) => (y.online - x.online) || (y.gm - x.gm) || String(x.masked).localeCompare(String(y.masked)));
   const rows = list.map((a) => `<li data-adv="${esc(a.uid)}"><span class="dot" style="background:${a.online ? 'var(--green)' : 'var(--slate)'}"></span>
-    <span>${esc(a.masked)}${a.gm ? ' <span class="role gm" style="margin-left:4px">GM</span>' : ''}${a.uid === ui.user?.uid ? ' <span class="muted small">（你）</span>' : ''}</span>
-    <span class="spacer"></span><span class="small ${a.online ? '' : 'muted'}">${a.online ? '在線' : '離線'}</span></li>`).join('');
+    <span class="adv-name">${esc(a.masked)}${a.gm ? ' <span class="role gm" style="margin-left:4px">GM</span>' : ''}${a.uid === ui.user?.uid ? ' <span class="muted small">（你）</span>' : ''}</span>
+    <span class="spacer"></span><span class="adv-meta">${a.last ? ipChip(a.last.ip) : ''}<span class="small ${a.online ? '' : 'muted'}">${a.online ? '在線' : a.last ? `最後 ${fmtWhen(a.last.at)}` : '離線'}</span></span></li>`).join('');
   const online = list.filter((a) => a.online).length;
   return `<div class="small muted" style="margin-bottom:6px">${list.length} 位冒險者，${online} 位在線${ui.anonOnline ? `；另有 ${ui.anonOnline} 位未登入的觀戰者` : ''}</div>
-    ${rows ? `<ul class="list">${rows}</ul>` : '<div class="muted small">還沒有冒險者註冊</div>'}`;
+    ${rows ? `<ul class="list">${rows}</ul>` : '<div class="muted small">還沒有冒險者註冊</div>'}
+    ${gmView ? anonVisits() : ''}`;
+}
+
+// 未登入的觀戰者（每台裝置最後一次），只有 GM 看得到
+function anonVisits() {
+  const list = ui.visits.anon.slice(0, 20);
+  return `<div class="small muted" style="margin:12px 0 6px">未登入的觀戰者・最近 ${list.length} 台裝置（只有 GM 看得到；IP 已轉成代號）</div>
+    ${list.length ? `<ul class="list">${list.map((v) => `<li><span class="dot" style="background:var(--slate)"></span>${ipChip(v.ip)}
+      <span class="spacer"></span><span class="small muted adv-meta">最後 ${fmtWhen(v.at)}</span></li>`).join('')}</ul>` : '<div class="muted small">還沒有紀錄</div>'}`;
 }
 
 // ---------- 外觀（電腦版的機種）----------
@@ -1757,6 +1808,7 @@ function toggleViewOnly() {
 }
 
 account.onUser((user, isEditor) => {
+  if (ui.user?.uid !== user?.uid) { ui.visits = null; ui.visitsAt = 0; } // 換人時不沿用上一位 GM 讀到的造訪紀錄
   ui.user = user;
   ui.isEditor = isEditor;
   syncRoles();

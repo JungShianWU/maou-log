@@ -111,6 +111,19 @@ service cloud.firestore {
       allow update: if validAdventurer();
     }
 
+    // 造訪紀錄（只留最後一次）：登入的人每個帳號一筆（u_<uid>），未登入的每台裝置一筆；只有 GM 能看
+    // IP 在瀏覽器裡就轉成 4 碼雜湊代號，資料庫不存完整 IP（格式也只接受代號）
+    match /visits/{device} {
+      allow read: if isEditor();
+      allow delete: if false;
+      allow create, update: if request.resource.data.keys().hasOnly(['uid', 'ip', 'at'])
+        && request.resource.data.uid is string
+        && ((request.resource.data.uid == '' && device.matches('^[A-Za-z0-9]{20}$'))
+          || (request.auth != null && request.resource.data.uid == request.auth.uid && device == 'u_' + request.auth.uid))
+        && request.resource.data.ip is string && request.resource.data.ip.matches('^([0-9a-f]{4})?$')
+        && request.resource.data.at == request.time;
+    }
+
     // 公開看板：任何人都能看（不用登入）；設定（範本、休戰日）只有 GM 能改；
     // 魔王、日誌、閉關登入的冒險者都能新增、修改；隱藏只有 GM；資料不能真的刪除
     match /boards/{board} {
@@ -135,7 +148,9 @@ service cloud.firestore {
         allow read: if true;
         allow delete: if false;
         allow create: if validBoss() && noHistory();
-        allow update: if validBoss() && notHiddenOrEditor() && historyAppended() && bossHistoryTruthful();
+        // 等級只能提升，不能降低
+        allow update: if validBoss() && notHiddenOrEditor() && historyAppended() && bossHistoryTruthful()
+          && request.resource.data.level >= resource.data.level;
       }
 
       match /events/{id} {

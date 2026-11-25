@@ -2,7 +2,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { EDITOR_UIDS } from '../firebase-config.js';
 
 const EDITOR = EDITOR_UIDS[0];
@@ -159,6 +159,9 @@ test('魔王：編輯者可新增修改刪除；等級、名稱、備註格式�
   await assertFails(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了' })));
   await assertFails(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了', history: [{ ...h1, level: 99 }] })));
   await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 31, note: '升級了', history: [h1] })));
+  // 等級只能提升，不能降低
+  const h1b = { level: 31, name: '魔王', note: '升級了', action: 'edit', by: EDITOR, t: 3 };
+  await assertFails(setDoc(doc(editor(), 'boards/main/bosses/b30'), boss({ level: 30, note: '升級了', history: [h1, h1b] })));
   await assertFails(deleteDoc(doc(editor(), 'boards/main/bosses/b30')));
   const h2 = { level: 31, name: '魔王', note: '升級了', action: 'hide', by: EDITOR, t: 3 };
   await assertSucceeds(setDoc(doc(editor(), 'boards/main/bosses/b30'), { deleted: true, deletedAt: 1, by: EDITOR, history: [h1, h2] }, { merge: true }));
@@ -251,4 +254,25 @@ test('註冊開關：關閉時新帳號不能登記、也不能寫；開放後�
 test('只能寫 main 看板', async () => {
   await assertFails(setDoc(doc(editor(), 'boards/other'), { templates: {} }));
   await assertFails(setDoc(doc(editor(), 'boards/other/events/x'), event()));
+});
+
+test('造訪紀錄：未登入寫自己的裝置、登入寫自己的帳號（只收 4 碼代號），只有 GM 看得到', async () => {
+  const id = 'AbCdEfGhIjKlMnOpQrSt';
+  const v = (extra = {}) => ({ uid: '', ip: 'a3f9', at: serverTimestamp(), ...extra });
+  await assertSucceeds(setDoc(doc(guest(), 'visits/' + id), v()));
+  await assertSucceeds(setDoc(doc(guest(), 'visits/' + id), v({ ip: '' }))); // 查不到 IP
+  await assertSucceeds(setDoc(doc(other(), 'visits/u_' + OTHER), v({ uid: OTHER })));
+  await assertFails(setDoc(doc(other(), 'visits/' + id), v({ uid: OTHER }))); // 帳號的紀錄只能放在 u_<uid>
+  await assertFails(setDoc(doc(other(), 'visits/u_' + EDITOR), v({ uid: OTHER })));
+  await assertFails(setDoc(doc(guest(), 'visits/u_' + OTHER), v())); // 未登入不能寫帳號的紀錄
+  await assertFails(setDoc(doc(guest(), 'visits/' + id), v({ ip: '203.69.1.2' }))); // 不收完整 IP
+  await assertFails(setDoc(doc(guest(), 'visits/' + id), v({ uid: OTHER }))); // 不能冒用別人
+  await assertFails(setDoc(doc(other(), 'visits/u_' + EDITOR), v({ uid: EDITOR })));
+  await assertFails(setDoc(doc(guest(), 'visits/' + id), v({ at: 1 }))); // 時間由伺服器決定
+  await assertFails(setDoc(doc(guest(), 'visits/' + id), v({ extra: 1 })));
+  await assertFails(setDoc(doc(guest(), 'visits/short'), v()));
+  await assertFails(getDoc(doc(guest(), 'visits/' + id)));
+  await assertFails(getDoc(doc(other(), 'visits/' + id)));
+  await assertSucceeds(getDoc(doc(editor(), 'visits/' + id)));
+  await assertFails(deleteDoc(doc(editor(), 'visits/' + id)));
 });

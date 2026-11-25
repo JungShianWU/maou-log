@@ -18,6 +18,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache, connectFirestoreEmulator,
   collection, doc, setDoc, getDoc, getDocs, onSnapshot, writeBatch, deleteField, runTransaction,
+  query, orderBy, limit, serverTimestamp as fsServerTime,
 } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js';
 import {
   getDatabase, ref, push, set, remove, onValue, onDisconnect, serverTimestamp, connectDatabaseEmulator,
@@ -264,8 +265,9 @@ const sameBoss = (cur, b) => cur.level === b.level && cur.name === b.name && (cu
 // existingBosses：雲端已存在的魔王（id → 資料，含已隱藏的）；同 id 的改成附加修改歷史後更新，並恢復顯示
 async function writeData(clean, { settings, existingBosses = new Map() }) {
   const ops = [];
-  clean.bosses.forEach(({ id, ...b }) => {
+  clean.bosses.forEach(({ id, ...saved }) => {
     const cur = existingBosses.get(id);
+    const b = cur ? { ...saved, level: Math.max(cur.level, saved.level) } : saved; // 等級只能提升：存檔較低時保留雲端的等級
     const ref = doc(col('bosses'), id);
     if (cur && sameBoss(cur, b) && !cur.deleted) return; // 內容沒變：不寫、不消耗修改次數
     if (cur) ops.push((x) => x.set(ref, { ...b, deleted: false, by: me(), history: appendHistory('bosses', cur, 'edit') }, { merge: true }));
@@ -407,6 +409,7 @@ export const store = {
       if (!snap.exists()) throw new Error('找不到這隻魔王');
       const cur = snap.data();
       if ((cur.history || []).length >= HISTORY_MAX) throw new Error(`這隻魔王已修改 ${HISTORY_MAX} 次，不能再修改`);
+      if (level < cur.level) throw new Error(`等級只能提升，不能低於 Lv.${cur.level}（可能有人剛改過）`); // 規則也會擋
       tx.set(ref, { level, name, note, by: me(), history: appendHistory('bosses', cur, 'edit') }, { merge: true });
     });
   },
@@ -455,7 +458,7 @@ export const store = {
     const existingBosses = new Map((await getDocs(col('bosses'))).docs.map((d) => [d.id, d.data()]));
     const full = clean.bosses.find((b) => {
       const cur = existingBosses.get(b.id);
-      return cur && !(sameBoss(cur, b) && !cur.deleted) && (cur.history || []).length >= HISTORY_MAX;
+      return cur && !(sameBoss(cur, { ...b, level: Math.max(cur.level, b.level) }) && !cur.deleted) && (cur.history || []).length >= HISTORY_MAX;
     });
     if (full) throw new Error(`魔王「${full.name}」已修改 ${HISTORY_MAX} 次，無法用存檔更新；請先改用新的魔王`);
     await writeData(clean, { settings: 'replace', existingBosses });
@@ -505,6 +508,68 @@ const STALE = 15 * 60_000;
 
 let refreshPresence = () => {};
 
+// ---------- 造訪紀錄（只有 GM 看得到）----------
+// 只留最後一次：登入的人每個帳號一筆（u_<uid>，登出後也還在），未登入的每台裝置一筆
+// 內容：{ uid（未登入為空字串）, ip（4 碼雜湊代號）, at（伺服器時間）}
+// IP 由第三方服務 ipify 查詢，在瀏覽器裡就轉成代號；完整 IP 不會寫進資料庫。
+// 代號只取雜湊的前 4 碼：同一個 IP 永遠是同一個代號；每個代號對應約 6.5 萬個 IP，無法直接還原成某一個 IP
+// （但拿已知 IP 比對是否同一來源很容易，所以只給 GM 看）
+const VISIT_EVERY = 30 * 60_000; // 同一個身分 30 分鐘內不重複寫（登入狀態改變時立刻寫），避免整天開著的分頁吃掉免費寫入額度
+const IP_TTL = 60 * 60_000; // IP 代號每小時重查一次（換網路後會更新）
+
+function deviceId() {
+  const ok = (v) => /^[A-Za-z0-9]{20}$/.test(v || '');
+  try {
+    let id = localStorage.getItem('maou-log:device');
+    if (!ok(id)) { id = randomId(); localStorage.setItem('maou-log:device', id); }
+    return id;
+  } catch {
+    return (deviceId.memo ||= randomId()); // 無痕模式等不能存：本次開啟用同一個
+  }
+}
+function randomId() {
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(20)), (n) => abc[n % abc.length]).join('');
+}
+
+let ipCodeP = null;
+let ipCodeAt = 0;
+function ipCode() {
+  if (Date.now() - ipCodeAt > IP_TTL) ipCodeP = null;
+  if (!ipCodeP) ipCodeAt = Date.now();
+  ipCodeP ||= fetch('https://api.ipify.org?format=json', { cache: 'no-store', signal: AbortSignal.timeout(5000) }) // 卡住時 5 秒放棄
+    .then((r) => r.json())
+    .then(async ({ ip }) => {
+      if (typeof ip !== 'string' || !ip) return '';
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`maou-log:${ip}`));
+      return Array.from(new Uint8Array(hash).slice(0, 2), (n) => n.toString(16).padStart(2, '0')).join('');
+    })
+    .catch(() => { ipCodeP = null; return ''; }); // 被擋或離線：這次不記代號，下次心跳再查
+  return ipCodeP;
+}
+
+let lastVisit = { uid: null, t: 0 };
+async function recordVisit() {
+  const uid = auth.currentUser?.uid || '';
+  if (lastVisit.uid === uid && Date.now() - lastVisit.t < VISIT_EVERY) return;
+  lastVisit = { uid, t: Date.now() };
+  const ip = await ipCode();
+  await setDoc(doc(db, 'visits', uid ? `u_${uid}` : deviceId()), { uid, ip, at: fsServerTime() }).catch(() => {});
+}
+
+// GM 用：uids 每個帳號的最後一次（直接讀 u_<uid>，不會被大量未登入紀錄擠掉）＋最近的未登入紀錄（新的在前）
+export async function loadVisits(uids = []) {
+  const row = (d) => ({ id: d.id, uid: d.data().uid || '', ip: d.data().ip || '', at: d.data().at?.toMillis?.() || 0 });
+  const [snap, mine] = await Promise.all([
+    getDocs(query(collection(db, 'visits'), orderBy('at', 'desc'), limit(200))),
+    Promise.all(uids.map((uid) => getDoc(doc(db, 'visits', `u_${uid}`)))),
+  ]);
+  return {
+    byUid: new Map(mine.filter((d) => d.exists()).map((d) => [d.data().uid, row(d)])),
+    anon: snap.docs.map(row).filter((v) => !v.uid),
+  };
+}
+
 // cb(在線人數, 在線的冒險者 uid 集合, 未登入的人數)
 export function watchOnline(cb) {
   let mine = null;
@@ -516,6 +581,7 @@ export function watchOnline(cb) {
     if (!connected || !mine) return;
     const uid = auth.currentUser?.uid;
     set(mine, uid ? { t: serverTimestamp(), uid } : { t: serverTimestamp() }).catch(() => {});
+    recordVisit();
   };
   // 登入／登出時立刻更新；RTDB 可能還沒拿到新的登入憑證，稍後再補送兩次
   refreshPresence = () => { beat(); setTimeout(beat, 1500); setTimeout(beat, 5000); };

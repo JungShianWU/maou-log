@@ -54,6 +54,7 @@ async function open(page, pick = 30, { tutorial = false } = {}) {
   if (!tutorial) await skipTutorial(page);
   // 休戰日資料改用空清單，測試不依賴外部網路
   await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } })); // IP 查詢用假資料
   await page.goto('/?emulator');
   await expect(page.locator('body.ready')).toBeAttached();
   await expect(page.locator('[data-boss]')).toHaveCount(2);
@@ -107,6 +108,7 @@ test('沒有選擇魔王時看不到任何資料', async ({ page, request }) => 
 test('網址的魔王參數壞掉時不會整頁空白', async ({ page }) => {
   await page.clock.setFixedTime(NOW);
   await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } })); // IP 查詢用假資料
   await skipTutorial(page);
   await page.goto('/?emulator#b=%E0%A4%A');
   await expect(page.locator('body.ready')).toBeAttached();
@@ -207,6 +209,7 @@ test('GM 新增魔王並編輯屬性備註，觀戰者看得到', async ({ page,
   const viewer = await viewerCtx.newPage();
   await viewer.clock.setFixedTime(NOW);
   await viewer.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await viewer.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } })); // IP 查詢用假資料
   await skipTutorial(viewer);
   await viewer.goto('/?emulator');
   await chip(viewer, 70).click();
@@ -328,6 +331,7 @@ test('同時在線人數包含沒登入的觀戰者', async ({ page, browser }) 
 });
 
 test('電腦版掌機：按鍵可以換頁、換魔王、開關分享', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('maou-log:skin', 'wide')); // 預設是無外殼，這裡測掌機
   await open(page);
   await expect(page.locator('.dpad')).toBeVisible();
   await page.keyboard.press('ArrowRight');
@@ -384,8 +388,8 @@ test('同一天重疊的閉關會被擋下（上半場＋下半場可以）', as
 test('電腦版可以切換機種外觀，重新整理後仍記得', async ({ page }) => {
   await open(page);
   const skin = () => page.evaluate(() => document.documentElement.dataset.skin);
-  expect(await skin()).toBe('wide'); // 預設：橫式掌機
-  await expect(page.locator('.brand .name-wide')).toBeVisible();
+  expect(await skin()).toBe('none'); // 預設：無外殼
+  await expect(page.locator('.controls')).toBeHidden();
   await tab(page, 'settings');
   await page.locator('#skins [data-skin="boy"]').click();
   expect(await skin()).toBe('boy');
@@ -996,4 +1000,118 @@ test('手機寬度：日誌第一行是時間・狀態・修改（按鈕大小�
   const m = await r.locator('.main').boundingBox();
   expect(t.x + t.width).toBeLessThanOrEqual(m.x);
   if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}/rumors-360.png` });
+});
+
+test('19:00 後停止計時：狀態時間與觀察時數只算到 19:00', async ({ page, request }) => {
+  await put(request, 'boards/main/events/w1', { boss: 'b30', at: new Date('2026-11-24T09:00:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/a1', { boss: 'b30', at: new Date('2026-11-24T17:35:00+08:00').getTime(), status: 'away', note: '', by: GM.uid });
+  await page.clock.setFixedTime(new Date('2026-11-24T20:22:00+08:00'));
+  await skipTutorial(page);
+  await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } }));
+  await page.goto('/?emulator');
+  await chip(page, 30).click();
+  await expect(page.locator('.now')).toContainText('從 17:35 開始・已 1 小時 25 分（算到 19:00）');
+  await expect(page.locator('.facts')).toContainText('9時'); // 09:00–19:00 扣午休（王座無人仍在冒險中），不是算到 20:22
+});
+
+test('魔王等級只能提升，不能降低', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'record');
+  await page.locator('#edit-boss').click();
+  await page.locator('#b-level').fill('29');
+  await page.locator('#b-save').click();
+  await expect(page.locator('#toast')).toHaveText('等級只能提升，不能低於 Lv.30');
+  await page.locator('#b-level').fill('31');
+  await page.locator('#b-save').click();
+  await expect(page.locator('.now .label')).toContainText('Lv.31');
+});
+
+test('廣播訊息範本預設收起，點開可以編輯', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  await expect(page.locator('#tpl-fold')).not.toHaveAttribute('open', '');
+  await expect(page.locator('[data-tpl]').first()).toBeHidden();
+  await page.locator('#tpl-fold > summary').click();
+  await expect(page.locator('[data-tpl]').first()).toBeVisible();
+});
+
+test('冒險者清單：GM 看得到最後上線時間與 IP 代號（含未登入的觀戰者），其他人看不到', async ({ page, browser }) => {
+  // 先有一位未登入的觀戰者來過
+  const viewerCtx = await browser.newContext();
+  const viewer = await viewerCtx.newPage();
+  await open(viewer);
+  await expect.poll(async () => (await viewer.locator('#online').textContent()) || '').toMatch(/\d/);
+  await viewer.waitForTimeout(1500); // 等造訪紀錄寫入
+  await tab(viewer, 'settings');
+  await expect(viewer.locator('#view-settings')).not.toContainText('#9945'); // 觀戰者看不到代號
+
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  const adv = page.locator('#view-settings');
+  await expect(adv).toContainText('未登入的觀戰者');
+  await expect(adv.locator('.var-chip', { hasText: '#9945' }).first()).toBeVisible(); // 203.0.113.7 的代號
+  await expect(adv).not.toContainText('203.0.113.7'); // 不顯示完整 IP
+  if (process.env.SHOT) {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await adv.locator('.var-chip', { hasText: '#9945' }).first().scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.SHOT}/adv-360.png` });
+  }
+  await viewerCtx.close();
+});
+
+test('造訪紀錄：冒險者登出後，GM 仍看得到他的最後上線時間', async ({ page, browser }) => {
+  const ctx = await browser.newContext();
+  const adv = await ctx.newPage();
+  await open(adv);
+  await login(adv, OTHER);
+  await adv.waitForTimeout(1500);
+  await tab(adv, 'settings');
+  await adv.locator('#logout').click();
+  await adv.waitForTimeout(1500);
+  await ctx.close();
+
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  const row = page.locator(`[data-adv="${OTHER.uid}"]`);
+  await expect(row).toContainText('最後');
+  await expect(row.locator('.var-chip')).toHaveText('#9945');
+  await expect(row).toContainText(/最後 (今天|昨天|\d+\/\d+) \d\d:\d\d/); // 測試時頁面時鐘固定、伺服器時間是真的，所以不限定「今天」
+  // 手機寬度：離線＋代號＋時間的列、帳號卡都不會撐出畫面
+  await page.setViewportSize({ width: 360, height: 780 });
+  await expect.poll(() => page.evaluate(() => { const el = document.querySelector('#scroll'); return el.scrollWidth - el.clientWidth; })).toBe(0);
+  const card = await row.locator('xpath=ancestor::div[contains(@class,"card")][1]').boundingBox();
+  const meta = await row.locator('.adv-meta').boundingBox();
+  expect(meta.x + meta.width).toBeLessThanOrEqual(card.x + card.width);
+  if (process.env.SHOT) { await row.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.SHOT}/adv2-360.png` }); }
+});
+
+test('19:00 後才記錄的狀態：不標註「算到 19:00」', async ({ page, request }) => {
+  await put(request, 'boards/main/events/w1', { boss: 'b30', at: new Date('2026-11-24T09:00:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/o1', { boss: 'b30', at: new Date('2026-11-24T19:30:00+08:00').getTime(), status: 'off', note: '', by: GM.uid });
+  await page.clock.setFixedTime(new Date('2026-11-24T20:00:00+08:00'));
+  await skipTutorial(page);
+  await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } }));
+  await page.goto('/?emulator');
+  await chip(page, 30).click();
+  await expect(page.locator('.now')).toContainText('從 19:30 開始・已 30 分'); // 下線多久照實際時間算
+  await expect(page.locator('.now')).not.toContainText('算到');
+});
+
+test('下線多久照實際時間算，不受 19:00 影響', async ({ page, request }) => {
+  await put(request, 'boards/main/events/w1', { boss: 'b30', at: new Date('2026-11-24T09:00:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
+  await put(request, 'boards/main/events/o1', { boss: 'b30', at: new Date('2026-11-24T18:10:00+08:00').getTime(), status: 'off', note: '', by: GM.uid });
+  await page.clock.setFixedTime(new Date('2026-11-24T20:30:00+08:00'));
+  await skipTutorial(page);
+  await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } }));
+  await page.goto('/?emulator');
+  await chip(page, 30).click();
+  await expect(page.locator('.now')).toContainText('從 18:10 開始・已 2 小時 20 分');
+  await expect(page.locator('.now')).not.toContainText('算到');
 });

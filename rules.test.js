@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, fmtDurationShort, parseHHMM as t,
+  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, fmtDurationShort, observedSince, parseHHMM as t,
 } from './rules.js';
 
 const at = (date, hhmm) => taipeiMs(date, hhmm);
@@ -219,6 +219,18 @@ test('fmtDurationShort：窄欄位用的短格式', () => {
   assert.equal(fmtDurationShort(472), '7時52分');
   assert.equal(fmtDurationShort(120), '2時');
   assert.equal(fmtDurationShort(5), '5分');
+});
+
+test('19:00 後停止計時：今天還沒下線的時段只算到 19:00', () => {
+  const r = day([['09:00', 'work']], { today: D, nowMin: t('21:30') });
+  assert.equal(r.workMinutes, 9 * 60); // 09:00–19:00 扣午休 1 小時
+  const before = day([['09:00', 'work']], { today: D, nowMin: t('18:00') });
+  assert.equal(before.workMinutes, 8 * 60);
+  const late = day([['19:30', 'work']], { today: D, nowMin: t('21:00') }); // 19:00 後才記錄的不算時數
+  assert.equal(late.workMinutes, 0);
+  assert.equal(observedSince(t('17:35'), t('20:22')), 85);
+  assert.equal(observedSince(t('17:35'), t('18:00')), 25);
+  assert.equal(observedSince(t('19:30'), t('20:00')), 0);
 });
 
 test('leaveSpanText', () => {
