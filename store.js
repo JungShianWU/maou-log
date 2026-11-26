@@ -141,6 +141,8 @@ const flushFirst = () => { const f = dataFirst; dataFirst = null; f?.(); };
 // 加入等待者：已有人在等就串起來，不覆蓋
 const addFirst = (fn) => { const prev = dataFirst; dataFirst = prev ? () => { prev(); fn(); } : fn; };
 const once = (fn) => { let done = false; return () => { if (!done) { done = true; fn(); } }; };
+// 讀取存檔、刪除存檔時要維持原狀的看板開關（註冊、網站開放）
+const siteSwitches = () => { const { signupOpen, siteOpen, closedNote } = cache.settings; return { signupOpen, siteOpen, closedNote }; };
 const canReadData = () => cache.settings.siteOpen || isEditorUid(auth.currentUser?.uid);
 function stopData() {
   flushFirst();
@@ -336,8 +338,7 @@ async function writeData(clean, { settings, existingBosses = new Map() }) {
   // 保留存檔裡原本的情報提供者；沒有的才算是讀取存檔的人
   clean.events.forEach((e) => ops.push((b) => b.set(doc(col('events')), { reporter: me(), ...e, by: me() })));
   clean.leaves.forEach((l) => ops.push((b) => b.set(doc(col('leaves')), { reporter: me(), ...l, by: me() })));
-  const { signupOpen, siteOpen, closedNote } = cache.settings; // 註冊開關、網站開關維持原狀
-  if (settings === 'replace') ops.push((b) => b.set(userDoc(), { ...clean.settings, signupOpen, siteOpen, closedNote }));
+  if (settings === 'replace') ops.push((b) => b.set(userDoc(), { ...clean.settings, ...siteSwitches() }));
   await commitInChunks(ops);
 }
 
@@ -541,8 +542,7 @@ export const store = {
   async clearAll() {
     requireOnline();
     await hideDocs(await listAllDocs());
-    const { signupOpen, siteOpen, closedNote } = cache.settings; // 註冊開關、網站開關維持原狀
-    await setDoc(userDoc(), { templates: {}, overrides: {}, signupOpen, siteOpen, closedNote });
+    await setDoc(userDoc(), { templates: {}, overrides: {}, ...siteSwitches() });
   },
 
   // 接雲端前留在這台裝置瀏覽器裡的舊存檔
