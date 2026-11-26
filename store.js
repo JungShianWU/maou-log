@@ -24,7 +24,7 @@ import {
   getDatabase, ref, push, set, remove, onValue, onDisconnect, serverTimestamp, connectDatabaseEmulator,
 } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-database.js';
 import { firebaseConfig, EDITOR_UIDS } from './firebase-config.js';
-import { DEFAULT_TEMPLATES, STATUSES, LEAVE_KINDS, maskEmail } from './rules.js';
+import { DEFAULT_TEMPLATES, STATUSES, LEAVE_KINDS, maskEmail, DEFAULT_HOURS, siteOpenNowAt } from './rules.js';
 
 // 測試用：本機網址加上 ?emulator 時改連 Firebase 模擬器（npm run test:e2e）
 const EMULATOR = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).has('emulator');
@@ -48,6 +48,7 @@ const CAL_KEY = (y) => `maou-log:calendar:${y}`;
 
 const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const isHHMM = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
+const minute = (v, d) => (Number.isInteger(v) && v >= 0 && v <= 1439 ? v : d);
 // 長度上限以 UTF-16 單位計算（與 Firestore 規則的 size()、輸入框 maxlength 一致），
 // 但只在完整字元之間截斷，不會把 emoji 切成半個
 function str(v, max = 100) {
@@ -114,7 +115,7 @@ function sanitize(d, fallbackBoss = null) {
 
 // ---------- 快取（畫面讀這份，Firestore 更新時就地改寫）----------
 
-const cache = { adventurers: [], bosses: [], events: [], leaves: [], settings: { templates: { ...DEFAULT_TEMPLATES }, overrides: {}, signupOpen: false, siteOpen: true, closedNote: '' } };
+const cache = { adventurers: [], bosses: [], events: [], leaves: [], settings: { templates: { ...DEFAULT_TEMPLATES }, overrides: {}, signupOpen: false, siteOpen: true, closedNote: '', ...DEFAULT_HOURS } };
 const changeListeners = new Set();
 const errorListeners = new Set();
 const notify = () => changeListeners.forEach((f) => f());
@@ -142,8 +143,23 @@ const flushFirst = () => { const f = dataFirst; dataFirst = null; f?.(); };
 const addFirst = (fn) => { const prev = dataFirst; dataFirst = prev ? () => { prev(); fn(); } : fn; };
 const once = (fn) => { let done = false; return () => { if (!done) { done = true; fn(); } }; };
 // 讀取存檔、刪除存檔時要維持原狀的看板開關（註冊、網站開放）
-const siteSwitches = () => { const { signupOpen, siteOpen, closedNote } = cache.settings; return { signupOpen, siteOpen, closedNote }; };
-const canReadData = () => cache.settings.siteOpen || isEditorUid(auth.currentUser?.uid);
+const siteSwitches = () => { const { signupOpen, siteOpen, closedNote, hoursOn, openFrom, openTo } = cache.settings; return { signupOpen, siteOpen, closedNote, hoursOn, openFrom, openTo }; };
+// 網站對 GM 以外的人開不開（手動開關＋定時開放）：畫面與讀資料都用 wasOpen，兩邊同時切換
+const computeOpen = () => siteOpenNowAt(cache.settings, Date.now());
+let wasOpen = null; // 看板設定更新、或 checkHours 發現跨過時段時才改
+const siteOpenNow = () => wasOpen ?? computeOpen();
+const canReadData = () => siteOpenNow() || isEditorUid(auth.currentUser?.uid);
+// 定時開放：時間到了就開始／停止讀資料並更新畫面（每 5 秒、切回這個分頁時檢查）
+function checkHours() {
+  if (!boardLoaded) return;
+  const open = computeOpen();
+  if (open === wasOpen) return;
+  wasOpen = open;
+  syncData();
+  notify();
+}
+setInterval(checkHours, 5000);
+document.addEventListener('visibilitychange', checkHours);
 function stopData() {
   flushFirst();
   deniedRetries = 0;
@@ -173,7 +189,7 @@ function syncData(onFirst = () => {}) {
     dataSubs = null;
     flushFirst();
     if (++deniedRetries > 3) { fail(err, 'read'); return; }
-    setTimeout(() => syncData(), 1500 * deniedRetries);
+    setTimeout(() => { checkHours(); syncData(); }, 1500 * deniedRetries); // 可能剛過開放時段：先重新判斷，關了就停止，不報錯
   };
   dataSubs = [
     onSnapshot(col('bosses'), (snap) => {
@@ -206,7 +222,11 @@ function subscribe() {
         signupOpen: s.signupOpen === true, // 預設關閉
         siteOpen: s.siteOpen !== false, // 預設開放
         closedNote: str(s.closedNote, 60),
+        hoursOn: s.hoursOn === true, // 預設不定時
+        openFrom: minute(s.openFrom, DEFAULT_HOURS.openFrom),
+        openTo: minute(s.openTo, DEFAULT_HOURS.openTo),
       };
+      wasOpen = computeOpen();
       // 第一次：先知道網站開不開，再決定要不要讀資料；資料第一批到齊（或不需要讀）時才算開站完成
       const first = !boardLoaded;
       boardLoaded = true;
@@ -502,7 +522,16 @@ export const store = {
     cache.settings.siteOpen = open;
     cache.settings.closedNote = closedNote;
     write(setDoc(userDoc(), { siteOpen: open, closedNote }, { merge: true }));
+    checkHours(); // 畫面狀態立刻跟上
   },
+  // GM：定時開放（平日 openFrom～openTo，單位分鐘）
+  async setOpenHours({ hoursOn, openFrom, openTo }) {
+    if (!(openFrom < openTo)) throw new Error('開放時間要早於關閉時間');
+    Object.assign(cache.settings, { hoursOn, openFrom, openTo });
+    write(setDoc(userDoc(), { hoursOn, openFrom, openTo }, { merge: true }));
+    checkHours(); // 畫面狀態立刻跟上
+  },
+  siteOpenNow,
   async setOverride(date, value) {
     if (value) cache.settings.overrides[date] = value;
     else delete cache.settings.overrides[date];

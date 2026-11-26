@@ -762,8 +762,10 @@ function syncRoles() {
   ui.canRecord = member && !ui.viewOnly;
 }
 
-// 網站暫時關閉：GM 以外的人只看到關閉畫面
-const siteClosed = () => DB.settings.siteOpen === false;
+// 網站關閉（GM 手動關閉，或定時開放的時段外）：GM 以外的人只看到關閉畫面
+const manualClosed = () => DB.settings.siteOpen === false;
+const siteClosed = () => !store.siteOpenNow();
+const hoursClosed = () => siteClosed() && !manualClosed(); // 只是時段外
 const closeArmed = () => Date.now() < (ui.closeArmedUntil || 0);
 const closedForMe = () => siteClosed() && !ui.isEditor;
 function renderClosed() {
@@ -772,11 +774,13 @@ function renderClosed() {
   ui.wasClosed = shut;
   document.body.classList.toggle('site-closed', shut);
   $('#closed').hidden = !shut;
-  const cardKey = shut ? JSON.stringify([DB.settings.closedNote, ui.user?.uid || '', ui.user?.email || '']) : '';
+  const byHours = hoursClosed();
+  const cardKey = shut ? JSON.stringify([byHours, R.hoursText(DB.settings), DB.settings.closedNote, ui.user?.uid || '', ui.user?.email || '']) : '';
   if (shut && cardKey !== ui.closedCardKey) { // 內容沒變就不重建（避免焦點跑掉、重複朗讀）
-    $('#closed').innerHTML = `<div class="closed-icon" aria-hidden="true">🏰</div><h2 tabindex="-1">魔王城暫時關閉中</h2>
-      ${DB.settings.closedNote ? `<p>${esc(DB.settings.closedNote)}</p>` : '<p class="muted">GM 正在整理，晚點再來看看。</p>'}
-      <p class="small muted">重新開放後這頁會自動更新，不用重新整理。</p>
+    $('#closed').innerHTML = `<div class="closed-icon" aria-hidden="true">${byHours ? '🌙' : '🏰'}</div><h2 tabindex="-1">${byHours ? '魔王城休息中' : '魔王城暫時關閉中'}</h2>
+      ${byHours ? `<p>開放時間：${R.hoursText(DB.settings)}（台灣時間）</p>`
+        : DB.settings.closedNote ? `<p>${esc(DB.settings.closedNote)}</p>` : '<p class="muted">GM 正在整理，晚點再來看看。</p>'}
+      <p class="small muted">${byHours ? '開放時間一到' : '重新開放後'}這頁會自動更新，不用重新整理。</p>
       ${ui.user
         ? `<p class="small muted">你已用 ${esc(R.maskEmail(ui.user.email))} 登入，網站重新開放後就能使用。</p>
            <button class="btn" id="closed-logout">登出／換帳號</button>`
@@ -795,15 +799,17 @@ function renderClosed() {
   const banner = $('#closed-banner');
   banner.hidden = !(siteClosed() && ui.isEditor);
   if (!banner.hidden) {
-    banner.innerHTML = '<span class="small">🔒 網站暫時關閉中：只有 GM 看得到內容</span><span class="spacer"></span><button class="btn sm primary" id="banner-open">重新開放</button>';
-    $('#banner-open').onclick = () => setSiteOpen(true);
+    banner.innerHTML = manualClosed()
+      ? '<span class="small">🔒 網站暫時關閉中：只有 GM 看得到內容</span><span class="spacer"></span><button class="btn sm primary" id="banner-open">重新開放</button>'
+      : `<span class="small">🌙 開放時間外（${R.hoursText(DB.settings)}）：只有 GM 看得到內容。要調整請到選單 → 網站開放</span>`;
+    $('#banner-open')?.addEventListener('click', () => setSiteOpen(true));
   }
   return shut;
 }
 async function setSiteOpen(open) {
   if (!ui.isEditor) return;
   await store.setSiteOpen(open, $('#closed-note')?.value ?? DB.settings.closedNote);
-  toast(open ? '網站已重新開放' : '網站已暫時關閉');
+  toast(!open ? '網站已暫時關閉' : R.siteOpenAt(DB.settings, Date.now()) ? '網站已重新開放' : '已取消手動關閉；現在是開放時間外');
   render();
 }
 
@@ -1517,11 +1523,19 @@ function renderSettings() {
     </div>` : ''}
     ${ui.isEditor ? `<div class="card">
       <h2>網站開放</h2>
-      <div class="row wrap-row"><span class="small">${siteClosed() ? '🔒 暫時關閉中：只有 GM 看得到內容' : '🟢 開放中：任何人都能觀戰'}</span><span class="spacer"></span>
-        <button class="btn sm ${siteClosed() ? 'primary' : 'danger'}" id="toggle-site">${siteClosed() ? '重新開放' : closeArmed() ? '再按一次確定關閉' : '暫時關閉'}</button></div>
+      <div class="row wrap-row"><span class="small">${manualClosed() ? '🔒 暫時關閉中：只有 GM 看得到內容' : hoursClosed() ? '🌙 開放時間外：只有 GM 看得到內容' : '🟢 開放中：任何人都能觀戰'}</span><span class="spacer"></span>
+        <button class="btn sm ${manualClosed() ? 'primary' : 'danger'}" id="toggle-site">${manualClosed() ? '重新開放' : closeArmed() ? '再按一次確定關閉' : '暫時關閉'}</button></div>
       <label class="f" style="margin-top:10px"><span>關閉時給大家看的一句話（選填）</span>
         <input type="text" id="closed-note" maxlength="60" placeholder="例如：整修中，明天見" value="${esc(DB.settings.closedNote)}"></label>
       <div class="small muted">離開輸入框就會自動儲存。關閉期間，冒險者也看不到、不能記錄；資料都保留，重新開放後一切照舊。</div>
+      <h3 style="margin-top:16px">⏰ 定時開放</h3>
+      <div class="row wrap-row"><span class="small">${DB.settings.hoursOn ? `🟢 已啟用：${R.hoursText(DB.settings)} 開放` : '⚪ 未啟用：照上面的開關'}</span><span class="spacer"></span>
+        <button class="btn sm ${DB.settings.hoursOn ? '' : 'primary'}" id="toggle-hours">${DB.settings.hoursOn ? '停用定時' : '啟用定時'}</button></div>
+      <div class="row" style="margin-top:8px">
+        <label class="f" style="flex:1;min-width:0;margin:0"><span>平日開放</span><input type="time" id="open-from" value="${R.fmtMin(DB.settings.openFrom)}"></label>
+        <label class="f" style="flex:1;min-width:0;margin:0"><span>關閉</span><input type="time" id="open-to" value="${R.fmtMin(DB.settings.openTo)}"></label></div>
+      <div class="row" style="margin-top:8px"><span class="spacer"></span><button class="btn sm" id="save-hours">儲存時段</button></div>
+      <div class="small muted">改完時間按「儲存時段」。啟用後，只有週一到週五的這段時間開放，其他時間（含週末）自動關閉；時間以台灣時間為準。手動「暫時關閉」優先：時段內也可以關閉。國定假日不會自動關閉。</div>
     </div>
     <div class="card">
       <h2>冒險者註冊</h2>
@@ -1559,17 +1573,35 @@ function renderSettings() {
   $('#toggle-view')?.addEventListener('click', toggleViewOnly);
   $('#toggle-hidden')?.addEventListener('click', toggleShowHidden);
   $('#toggle-site')?.addEventListener('click', (e) => {
-    if (siteClosed()) { setSiteOpen(true); return; } // 重新開放不用確認
+    if (manualClosed()) { setSiteOpen(true); return; } // 重新開放不用確認
     if (closeArmed()) { ui.closeArmedUntil = 0; setSiteOpen(false); return; } // 關閉影響全站：4 秒內再按一次才生效
     ui.closeArmedUntil = Date.now() + 4000;
     e.currentTarget.textContent = '再按一次確定關閉';
-    setTimeout(() => { const b = $('#toggle-site'); if (b && !closeArmed() && !siteClosed()) b.textContent = '暫時關閉'; }, 4100);
+    setTimeout(() => { const b = $('#toggle-site'); if (b && !closeArmed() && !manualClosed()) b.textContent = '暫時關閉'; }, 4100);
   });
   $('#closed-note')?.addEventListener('change', async (e) => {
     if (!ui.isEditor) return;
-    await store.setSiteOpen(!siteClosed(), e.target.value);
+    await store.setSiteOpen(!manualClosed(), e.target.value);
     toast('已儲存說明');
   });
+  const saveHours = async (hoursOn, timesOnly = false) => {
+    if (!ui.isEditor) return;
+    if (!hoursOn && !timesOnly) { // 停用：沿用已存的時段，不管輸入框裡還沒存的內容
+      await store.setOpenHours({ hoursOn: false, openFrom: DB.settings.openFrom, openTo: DB.settings.openTo });
+      toast('已停用定時開放');
+      render();
+      return;
+    }
+    const [from, to] = [$('#open-from').value, $('#open-to').value];
+    const openFrom = from ? R.parseHHMM(from) : NaN, openTo = to ? R.parseHHMM(to) : NaN;
+    if (!(openFrom < openTo)) { toast('開放時間要早於關閉時間'); render(); return; }
+    await store.setOpenHours({ hoursOn, openFrom, openTo });
+    const shutNow = hoursOn && hoursClosed() ? '；現在是開放時間外，網站已關閉' : '';
+    toast((timesOnly ? `已儲存時段：${R.hoursText(DB.settings)}` : `已設定定時開放：${R.hoursText(DB.settings)}`) + shutNow);
+    render();
+  };
+  $('#toggle-hours')?.addEventListener('click', () => saveHours(!DB.settings.hoursOn));
+  $('#save-hours')?.addEventListener('click', () => saveHours(DB.settings.hoursOn, true)); // 兩個時間一起存（打字到一半不會存）
   $('#toggle-signup')?.addEventListener('click', async () => {
     if (!ui.isEditor) return;
     await store.setSignupOpen(!DB.settings.signupOpen);

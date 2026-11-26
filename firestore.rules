@@ -12,10 +12,25 @@ service cloud.firestore {
       return request.auth != null
         && (isEditor() || (siteOpen() && exists(/databases/$(database)/documents/adventurers/$(request.auth.uid))));
     }
-    // 網站是否開放（GM 在網站選單切換，存在 boards/main.siteOpen；沒設定＝開放）
+    // 網站是否開放：GM 沒有手動關閉（boards/main.siteOpen），而且在定時開放的時段內；沒有看板設定＝開放
     function siteOpen() {
       return !exists(/databases/$(database)/documents/boards/main) // 還沒有看板設定＝開放
-        || get(/databases/$(database)/documents/boards/main).data.get('siteOpen', true) == true;
+        || (get(/databases/$(database)/documents/boards/main).data.get('siteOpen', true) == true
+          && inOpenHours(get(/databases/$(database)/documents/boards/main).data));
+    }
+    // 定時開放（hoursOn）：只有平日（週一到週五）openFrom～openTo 開放，以伺服器的台灣時間（UTC+8）判斷；單位是分鐘
+    // 預設時段要和 rules.js 的 DEFAULT_HOURS 一致（rules.test.js 會檢查）
+    function defaultFrom() { return 540; }
+    function defaultTo() { return 1020; }
+    // dayOfWeek()：實測週四＝4（週一＝1）；週日不論是 0 或 7 都在 1～5 之外
+    function inOpenHours(b) {
+      let t = request.time + duration.value(8, 'h');
+      let m = t.hours() * 60 + t.minutes();
+      return b.get('hoursOn', false) != true
+        || (t.dayOfWeek() >= 1 && t.dayOfWeek() <= 5 && m >= b.get('openFrom', defaultFrom()) && m < b.get('openTo', defaultTo()));
+    }
+    function isMinute(v) {
+      return v is int && v >= 0 && v <= 1439;
     }
     // 魔王、日誌、閉關：開放時任何人都能看；暫時關閉時只有 GM 看得到
     function canReadBoard() {
@@ -140,7 +155,11 @@ service cloud.firestore {
       allow read: if true;
       allow delete: if false;
       allow create, update: if isEditor() && board == 'main'
-        && request.resource.data.keys().hasOnly(['templates', 'overrides', 'signupOpen', 'siteOpen', 'closedNote'])
+        && request.resource.data.keys().hasOnly(['templates', 'overrides', 'signupOpen', 'siteOpen', 'closedNote', 'hoursOn', 'openFrom', 'openTo'])
+        && request.resource.data.get('hoursOn', false) is bool
+        && isMinute(request.resource.data.get('openFrom', defaultFrom()))
+        && isMinute(request.resource.data.get('openTo', defaultTo()))
+        && request.resource.data.get('openFrom', defaultFrom()) < request.resource.data.get('openTo', defaultTo())
         && request.resource.data.get('signupOpen', false) is bool
         && request.resource.data.get('siteOpen', true) is bool
         && request.resource.data.get('closedNote', '') is string

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, fmtDurationShort, observedSince, parseHHMM as t,
+  evaluateSchedule, evaluateDay, summarize, leavesWorkMinutes, leavesOverlap, taipeiMs, dateKey, minutesOf, addDays, dayType, leaveDays, renderTemplate, faultText, leaveSpanText, bossLabel, DEFAULT_TEMPLATES, maskEmail, fmtDurationShort, observedSince, parseHHMM as t, inOpenHours, siteOpenAt, siteOpenNowAt, hoursText, DEFAULT_HOURS,
 } from './rules.js';
 
 const at = (date, hhmm) => taipeiMs(date, hhmm);
@@ -301,4 +301,30 @@ test('renderTemplate：替換變數並清掉多餘空行', () => {
   assert.equal(renderTemplate('{不存在}', {}), '{不存在}');
   // 內建屬性名稱不會被替換
   assert.equal(renderTemplate('x {constructor}', {}), 'x {constructor}');
+});
+
+test('定時開放：只有平日的時段內開放（台灣時間），手動關閉優先', () => {
+  const h = { ...DEFAULT_HOURS, hoursOn: true }; // 平日 09:00–17:00
+  assert.equal(hoursText(h), '平日 09:00–17:00');
+  assert.equal(inOpenHours(h, at('2026-11-23', '08:59')), false); // 週一
+  assert.equal(inOpenHours(h, at('2026-11-23', '09:00')), true);
+  assert.equal(inOpenHours(h, at('2026-11-27', '16:59')), true); // 週五
+  assert.equal(inOpenHours(h, at('2026-11-27', '17:00')), false);
+  assert.equal(inOpenHours(h, at('2026-11-28', '10:00')), false); // 週六
+  assert.equal(inOpenHours(h, at('2026-11-29', '10:00')), false); // 週日
+  assert.equal(inOpenHours({ ...h, hoursOn: false }, at('2026-11-28', '03:00')), true); // 沒啟用：不受時段限制
+  assert.equal(siteOpenAt({ ...h, siteOpen: true }, at('2026-11-23', '10:00')), true);
+  assert.equal(siteOpenAt({ ...h, siteOpen: false }, at('2026-11-23', '10:00')), false);
+  assert.equal(siteOpenAt({ ...h, siteOpen: true }, at('2026-11-23', '18:00')), false);
+  // 網頁：開放晚 5 秒、關閉不延後
+  assert.equal(siteOpenNowAt(h, at('2026-11-23', '09:00') + 3000), false);
+  assert.equal(siteOpenNowAt(h, at('2026-11-23', '09:00') + 6000), true);
+  assert.equal(siteOpenNowAt(h, at('2026-11-23', '17:00')), false);
+});
+
+test('定時開放的預設時段：資料庫規則與 rules.js 一致', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./firestore.rules', import.meta.url), 'utf8');
+  assert.equal(Number(src.match(/function defaultFrom\(\) \{ return (\d+); \}/)[1]), DEFAULT_HOURS.openFrom);
+  assert.equal(Number(src.match(/function defaultTo\(\) \{ return (\d+); \}/)[1]), DEFAULT_HOURS.openTo);
 });

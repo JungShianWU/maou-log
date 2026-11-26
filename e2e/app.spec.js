@@ -1210,6 +1210,85 @@ test('網站已關閉時 GM 從關閉畫面登入：看得到資料，按鍵在�
   await expect(page.locator('#toast')).not.toContainText('同步失敗');
 });
 
+// 開啟網站但不選魔王（網站可能是關閉的）
+async function openAt(page, time) {
+  await page.clock.setFixedTime(time);
+  await skipTutorial(page);
+  await page.route('https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/**', (route) => route.fulfill({ json: [] }));
+  await page.route('https://api.ipify.org/**', (route) => route.fulfill({ json: { ip: '203.0.113.7' } }));
+  await page.goto('/?emulator');
+  await expect(page.locator('body.ready')).toBeAttached();
+}
+
+test('定時開放：GM 在選單設定時段；時間不對會被擋下', async ({ page }) => {
+  await open(page);
+  await login(page, GM);
+  await tab(page, 'settings');
+  await expect(page.locator('#toggle-hours')).toHaveText('啟用定時');
+  await page.locator('#open-from').fill('17:00');
+  await page.locator('#save-hours').click();
+  await expect(page.locator('#toast')).toHaveText('開放時間要早於關閉時間');
+  await expect(page.locator('#open-from')).toHaveValue('09:00'); // 退回原本的設定
+  // 兩個時間一起改：先改開放時間也可以（存的時候才一起檢查）
+  await page.locator('#open-from').fill('18:00');
+  await page.locator('#open-to').fill('22:00');
+  await page.locator('#save-hours').click();
+  await expect(page.locator('#toast')).toHaveText('已儲存時段：平日 18:00–22:00');
+  await page.locator('#open-from').fill('09:00');
+  await page.locator('#open-to').fill('18:30');
+  await page.locator('#save-hours').click();
+  await expect(page.locator('#toast')).toHaveText('已儲存時段：平日 09:00–18:30');
+  await page.locator('#toggle-hours').click();
+  await expect(page.locator('#toast')).toHaveText('已設定定時開放：平日 09:00–18:30');
+  await expect(page.locator('#toggle-hours')).toHaveText('停用定時');
+  await expect(page.locator('#view-settings')).toContainText('🟢 已啟用：平日 09:00–18:30 開放');
+  await expect(page.locator('#closed-banner')).toBeHidden(); // 週二 09:12：開放中
+  // 停用：不管輸入框裡還沒存的時間
+  await page.locator('#open-to').fill('08:00');
+  await page.locator('#toggle-hours').click();
+  await expect(page.locator('#toast')).toHaveText('已停用定時開放');
+  await expect(page.locator('#open-to')).toHaveValue('18:30');
+  await page.locator('#toggle-hours').click();
+  if (process.env.SHOT) {
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.locator('#toggle-hours').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.SHOT}/hours-360.png` });
+  }
+});
+
+test('定時開放：時段外與週末觀戰者看到休息畫面；GM 照常使用並看到提示', async ({ page, browser, request }) => {
+  await put(request, 'boards/main', { hoursOn: true, openFrom: 540, openTo: 1020 });
+  await openAt(page, new Date('2026-11-24T17:30:00+08:00')); // 週二 17:30
+  await expect(page.locator('#closed')).toContainText('魔王城休息中');
+  await expect(page.locator('#closed')).toContainText('開放時間：平日 09:00–17:00');
+  await expect(page.locator('[data-boss]')).toHaveCount(0);
+  const sat = await (await browser.newContext()).newPage();
+  await openAt(sat, new Date('2026-11-28T10:00:00+08:00')); // 週六
+  await expect(sat.locator('#closed')).toContainText('魔王城休息中');
+
+  await page.locator('#closed-login').click();
+  await page.locator('#lg-email').fill(GM.email);
+  await page.locator('#lg-pass').fill(GM.password);
+  await page.locator('#login-form button[type=submit]').click();
+  await expect(page.locator('#closed')).toBeHidden();
+  await expect(page.locator('#closed-banner')).toContainText('開放時間外（平日 09:00–17:00）');
+  await expect(page.locator('#banner-open')).toHaveCount(0); // 時段外不能一鍵開放（要改時段或停用定時）
+  await expect(page.locator('[data-boss]')).toHaveCount(2);
+  await tab(page, 'settings');
+  await expect(page.locator('#view-settings')).toContainText('🌙 開放時間外');
+  await expect(page.locator('#toggle-site')).toHaveText('暫時關閉');
+});
+
+test('定時開放：時間到了開著的頁面自動關閉', async ({ page, request }) => {
+  await open(page); // 週二 09:12，還沒定時
+  await put(request, 'boards/main', { hoursOn: true, openFrom: 540, openTo: 553 }); // 09:00–09:13
+  await expect(page.locator('#closed')).toBeHidden();
+  await page.clock.setFixedTime(new Date('2026-11-24T09:13:10+08:00'));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.locator('#closed')).toContainText('魔王城休息中');
+  await expect(page.locator('[data-boss]')).toHaveCount(0);
+});
+
 test('網站關閉時 GM：輸入中也看到提示列；重新整理不會先閃出關閉畫面', async ({ page, request }) => {
   await open(page);
   await login(page, GM);

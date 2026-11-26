@@ -81,6 +81,23 @@ export function addDays(date, n) {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
+// 定時開放：只有平日（週一到週五）openFrom～openTo（台灣時間，單位分鐘）開放，其他時間自動關閉
+// 資料庫規則（firestore.rules 的 inOpenHours）用伺服器時間做同樣的判斷，兩邊要一致
+export const DEFAULT_HOURS = { hoursOn: false, openFrom: 9 * 60, openTo: 17 * 60 };
+export function inOpenHours(s, ms) {
+  if (!s.hoursOn) return true;
+  const d = new Date(ms + TZ_OFFSET_MS);
+  const dow = d.getUTCDay(); // 0 = 週日
+  const m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return dow >= 1 && dow <= 5 && m >= s.openFrom && m < s.openTo;
+}
+// 網站對 GM 以外的人是否開放：沒有手動關閉，而且在定時開放的時段內
+export const siteOpenAt = (s, ms) => s.siteOpen !== false && inOpenHours(s, ms);
+export const hoursText = (s) => `平日 ${fmtMin(s.openFrom)}–${fmtMin(s.openTo)}`;
+// 開放時網頁比伺服器晚幾秒才切換（電腦時鐘稍快時不會先被規則拒絕）；關閉時不延後
+export const HOURS_LAG_MS = 5000;
+export const siteOpenNowAt = (s, ms) => siteOpenAt(s, ms) && siteOpenAt(s, ms - HOURS_LAG_MS);
+
 export function fmtMin(m) {
   if (m == null) return '—';
   return `${pad(Math.floor(m / 60))}:${pad(Math.round(m % 60))}`;

@@ -309,3 +309,45 @@ test('還沒有看板設定時視為開放（任何人都能讀）', async () =>
   await assertSucceeds(getDoc(doc(guest(), 'boards/main/bosses/b30')));
   await assertSucceeds(setDoc(doc(other(), 'boards/main/events/n1'), event({ by: OTHER, reporter: OTHER })));
 });
+
+test('定時開放：時段外只有 GM 讀得到、冒險者不能寫；時段由 GM 設定且格式要對', async () => {
+  // 以模擬器的現在時間（台灣時間）判斷：模擬器無法固定 request.time，所以「平日放行／週末拒絕」只會驗到今天是哪一種；
+  // 星期與邊界的完整情況由 rules.test.js 的 inOpenHours 單元測試涵蓋。午夜前後執行可能偶發失敗
+  const t = new Date(Date.now() + 8 * 3600_000);
+  const m = t.getUTCHours() * 60 + t.getUTCMinutes();
+  const weekday = t.getUTCDay() >= 1 && t.getUTCDay() <= 5;
+  const set = (data) => env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'boards/main'), { templates: {}, overrides: {}, ...data });
+  });
+  // 時段不包含現在：關閉
+  const [from, to] = m < 720 ? [m + 30, m + 60] : [0, 30];
+  await set({ hoursOn: true, openFrom: from, openTo: to });
+  await assertFails(getDoc(doc(guest(), 'boards/main/bosses/b30')));
+  await assertFails(setDoc(doc(other(), 'boards/main/events/n1'), event({ by: OTHER, reporter: OTHER })));
+  await assertSucceeds(getDoc(doc(editor(), 'boards/main/bosses/b30')));
+  await assertSucceeds(getDoc(doc(guest(), 'boards/main')));
+  // 時段包住現在（台灣時間）：平日開放、週末關閉；規則若用錯時區就會失敗
+  if (m >= 10 && m <= 1428) {
+    await set({ hoursOn: true, openFrom: m - 10, openTo: m + 10 });
+    const now = getDoc(doc(guest(), 'boards/main/bosses/b30'));
+    await (weekday ? assertSucceeds(now) : assertFails(now));
+  }
+  // 停用定時：照手動開關
+  await set({ hoursOn: false, openFrom: from, openTo: to });
+  await assertSucceeds(getDoc(doc(guest(), 'boards/main/bosses/b30')));
+  // 整天的時段：平日開放、週末關閉
+  await set({ hoursOn: true, openFrom: 0, openTo: 1439 });
+  const all = getDoc(doc(guest(), 'boards/main/bosses/b30'));
+  await (weekday && m < 1439 ? assertSucceeds(all) : assertFails(all));
+  // 手動關閉優先
+  await set({ hoursOn: true, openFrom: 0, openTo: 1439, siteOpen: false });
+  await assertFails(getDoc(doc(guest(), 'boards/main/bosses/b30')));
+  // 只有 GM 能設定；格式檢查
+  await assertFails(setDoc(doc(other(), 'boards/main'), { hoursOn: false }, { merge: true }));
+  await assertSucceeds(setDoc(doc(editor(), 'boards/main'), { hoursOn: true, openFrom: 540, openTo: 1020 }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { hoursOn: 'yes' }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { openFrom: 1020, openTo: 540 }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { openFrom: 1020, openTo: 1020 }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { openFrom: 0, openTo: 1440 }, { merge: true }));
+  await assertFails(setDoc(doc(editor(), 'boards/main'), { openFrom: 9.5, openTo: 1000 }, { merge: true }));
+});
