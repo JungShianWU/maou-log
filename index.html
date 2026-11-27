@@ -50,6 +50,7 @@
   .wrap { max-width: 540px; margin: 0 auto; padding: 16px 16px 24px; }
   header.top { display: flex; align-items: center; justify-content: space-between; padding: 6px 2px 16px; gap: 8px; }
   header.top h1 { font-size: 24px; margin: 0; color: var(--gold); text-shadow: 3px 3px 0 var(--red), 5px 5px 0 #000; letter-spacing: .04em; }
+  header.top h1 .ver { font-size: 11px; margin-left: 6px; color: var(--sub); text-shadow: none; letter-spacing: 0; vertical-align: middle; }
   header.top .date { color: var(--cyan); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
 
   /* 像素視窗 */
@@ -418,7 +419,7 @@
   <div class="screen-scroll" id="scroll">
 <div class="wrap">
   <header class="top">
-    <h1 id="title"><span id="sprite"></span>魔王出沒紀錄</h1>
+    <h1 id="title"><span id="sprite"></span>魔王出沒紀錄<span id="ver" class="ver" aria-hidden="true"></span></h1>
     <span class="date" id="clock"></span>
   </header>
   <div id="closed-banner" class="banner" role="status" hidden></div>
@@ -485,6 +486,8 @@
 import * as R from './rules.js';
 import { store, account, loadCalendar, watchOnline, isEditorUid, loadVisits } from './store.js';
 import { VERSION } from './version.js';
+
+document.getElementById('ver').textContent = `v${VERSION}`;
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];

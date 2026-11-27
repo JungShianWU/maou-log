@@ -88,6 +88,7 @@ test('觀戰模式：不用登入就能看，看不到任何編輯功能', async
   await expect(page.locator('[data-tpl]')).toHaveCount(0);
   await expect(page.locator('#bk-export')).toHaveCount(0);
   await expect(page.locator('#view-settings')).toContainText(`v${VERSION}`);
+  await expect(page.locator('#title .ver')).toHaveText(`v${VERSION}`); // 左上角標題旁也有版本號
 });
 
 test('沒有選擇魔王時看不到任何資料', async ({ page, request }) => {
