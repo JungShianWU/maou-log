@@ -872,13 +872,13 @@ test('傳聞：旁白必填，不改變魔王狀態，可以一次列出所有�
   await ctx.close();
 });
 
-test('冒險頁顯示最早遇見、最後遇見與觀察時數，不顯示可下線', async ({ page, request }) => {
+test('冒險頁顯示最早情報、最後情報與觀察時數，不顯示可下線', async ({ page, request }) => {
   await put(request, 'boards/main/events/a1', { boss: 'b30', at: new Date('2026-11-24T08:50:00+08:00').getTime(), status: 'work', note: '', by: GM.uid });
   await put(request, 'boards/main/events/a2', { boss: 'b30', at: new Date('2026-11-24T09:05:00+08:00').getTime(), status: 'slack', note: '', by: GM.uid });
   await open(page);
   const facts = page.locator('#view-record .facts');
-  await expect(facts).toContainText('最早遇見08:50');
-  await expect(facts).toContainText('最後遇見09:05（發呆摸魚）');
+  await expect(facts).toContainText('最早情報08:50');
+  await expect(facts).toContainText('最後情報09:05（發呆摸魚）');
   await expect(facts).toContainText('觀察時數');
   await expect(page.locator('#view-record')).not.toContainText('可下線');
 });

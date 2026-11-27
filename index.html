@@ -1032,8 +1032,8 @@ function renderRecord() {
       ${day.remote ? '<div class="boss-note" style="border-left-color:var(--cyan)">🏠 在家修煉：照班表計算，不記錄上下線時間</div>' : ''}
       ${day.arrival != null && !day.remote ? `
       <div class="facts">
-        <div class="fact"><div class="k">最早遇見</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
-        <div class="fact"><div class="k">最後遇見</div><div class="v">${cur ? `${R.fmtMin(R.minutesOf(cur.at))}<span class="sub">（${st.label}）</span>` : '—'}</div></div>
+        <div class="fact"><div class="k">最早情報</div><div class="v ${day.lateMinutes ? 'bad' : ''}">${R.fmtMin(day.arrival)}</div></div>
+        <div class="fact"><div class="k">最後情報</div><div class="v">${cur ? `${R.fmtMin(R.minutesOf(cur.at))}<span class="sub">（${st.label}）</span>` : '—'}</div></div>
         <div class="fact"><div class="k">觀察時數</div><div class="v">${R.fmtDurationShort(day.workMinutes)}</div></div>
       </div>
       <div class="bar-label"><span>EXP</span><span class="num">${Math.round(exp)}%</span></div>
@@ -1312,7 +1312,7 @@ function openDay(date) {
     ${d.remote ? `<div class="boss-note" style="margin-top:0">🏠 在家修煉：照班表計算，不記錄上下線時間（觀察時數 ${R.fmtDuration(d.workMinutes)}）</div>` : ''}
     ${d.arrival != null && !d.remote ? `
       <div class="facts" style="margin-top:0">
-        ${fact('最早遇見', R.fmtMin(d.arrival), d.lateMinutes > 0)}
+        ${fact('最早情報', R.fmtMin(d.arrival), d.lateMinutes > 0)}
         ${fact('下線', d.departure != null ? R.fmtMin(d.departure) : '未見', d.earlyMinutes > 0)}
         ${fact('觀察時數', R.fmtDuration(d.workMinutes))}
         ${fact('吃飯', R.fmtDuration(d.lunchMinutes))}
@@ -1450,7 +1450,7 @@ function download(name, text, type) {
 }
 
 function downloadCSV(days) {
-  const head = ['日期', '星期', '日別', '狀態', '最早遇見', '下線', '遲到(分)', '早退(分)', '加時(分)', '觀察時數(分)', '吃飯(分)', '王座無人(次)', '王座無人(分)', '睡眠補血(分)', '發呆摸魚(分)', '閉關', '紀錄明細'];
+  const head = ['日期', '星期', '日別', '狀態', '最早情報', '下線', '遲到(分)', '早退(分)', '加時(分)', '觀察時數(分)', '吃飯(分)', '王座無人(次)', '王座無人(分)', '睡眠補血(分)', '發呆摸魚(分)', '閉關', '紀錄明細'];
   // 以 = + - @ 開頭的內容加上 ' 避免 Excel 當成公式執行
   const q = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; };
   const rows = days.filter((d) => d.state !== 'future').map((d) => [
@@ -1655,7 +1655,7 @@ function tutorialSteps(kind) {
   const viewer = [
     { text: '歡迎來到「魔王出沒紀錄」！我是嚮導，帶你走一圈。這裡記錄每隻魔王每天的出沒動態。' },
     { target: '#boss-bar', text: '先從這裡選一隻要觀戰的魔王。沒有選魔王的話，什麼資料都看不到喔。' },
-    { tab: 'record', target: '#view-record .now', text: '這裡是魔王目前的狀態：現在在做什麼、最後遇見的時間、今天觀察了多久。' },
+    { tab: 'record', target: '#view-record .now', text: '這裡是魔王目前的狀態：現在在做什麼、最後情報的時間、今天觀察了多久。' },
     { tab: 'record', target: '#share-now', text: '按這顆按鈕，就能把魔王的動態傳給你的 LINE 好友。電腦版會改成複製文字，貼到 LINE 就好。' },
     { target: 'nav.tabs', text: '下方切換頁面：「地圖」看每天的狀況，「成就」看遲到、早退等統計，「選單」有更多設定。' },
     { target: '#online', text: '右上角是目前同時在線的冒險者人數，沒登入的也算。' },
