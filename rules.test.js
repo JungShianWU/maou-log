@@ -101,6 +101,33 @@ test('離開座位算工時，並統計次數', () => {
   assert.equal(r.earlyMinutes, 60);
 });
 
+test('王座無人不算上線：一早只看到王座無人，以之後的上線起算遲到，之前的時段不算觀察時數', () => {
+  const r = day([['09:12', 'away'], ['09:45', 'work'], ['18:00', 'off']]);
+  assert.equal(r.arrival, t('09:45'));
+  assert.equal(r.lateMinutes, 45);
+  assert.equal(r.workMinutes, 435); // 09:45–18:00 扣午休
+  assert.equal(r.awayCount, 0);
+  assert.equal(r.awayMinutes, 0);
+  assert.equal(r.state, 'complete');
+});
+
+test('王座無人不算上線：整天只有王座無人，視為沒看到上線', () => {
+  const past = day([['09:12', 'away']]);
+  assert.equal(past.arrival, null);
+  assert.equal(past.state, 'noRecord');
+  assert.equal(past.workMinutes, 0);
+  const today = evaluateDay({ date: D, today: D, nowMin: t('10:00'), workday: true, events: [{ at: at(D, '09:12'), status: 'away' }] });
+  assert.equal(today.state, 'pending');
+  assert.equal(today.workMinutes, 0);
+});
+
+test('上線後的王座無人照常算觀察時數與次數', () => {
+  const r = day([['08:50', 'work'], ['09:30', 'away'], ['10:00', 'back'], ['18:00', 'off']]);
+  assert.equal(r.arrival, t('08:50'));
+  assert.equal(r.awayCount, 1);
+  assert.equal(r.awayMinutes, 30);
+});
+
 test('回到王座、睡覺回血都算工時，睡覺另計次數', () => {
   const r = day([['09:00', 'work'], ['10:00', 'away'], ['10:20', 'back'], ['14:00', 'nap'], ['14:30', 'work'], ['18:00', 'off']]);
   assert.equal(r.workMinutes, 480);
@@ -151,6 +178,11 @@ test('休戰日在家修煉：不算假日加場，地圖顯示在家修煉', ()
   assert.equal(r.remoteHoliday, true);
   assert.equal(r.remote, false); // 不鎖記錄（人可能後來進公司）
   assert.equal(day([['10:00', 'work']], { workday: false }).state, 'extra');
+});
+
+test('休戰日只看到王座無人，不算假日加場', () => {
+  assert.equal(day([['10:00', 'away']], { workday: false }).state, 'holiday');
+  assert.equal(day([['10:00', 'away'], ['10:30', 'work']], { workday: false }).state, 'extra');
 });
 
 test('範本舊變數 {今日上線} 對應到 {觀察時數}', () => {

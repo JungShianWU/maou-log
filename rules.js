@@ -291,13 +291,15 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
     result.segments.push({ status: evs[i].status, start, end, open, note: evs[i].note || '' });
   }
 
-  const firstIn = evs.find((e) => e.status !== 'off');
+  // 王座無人不算上線：一早只看到王座空著，魔王可能根本還沒來
+  const firstIn = evs.find((e) => e.status !== 'off' && e.status !== 'away');
   if (firstIn) result.arrival = minutesOf(firstIn.at);
   const last = evs[evs.length - 1];
   if (firstIn && last.status === 'off') result.departure = minutesOf(last.at);
 
   for (const seg of result.segments) {
     if (seg.end == null) continue;
+    if (result.arrival == null || seg.start < result.arrival) continue; // 還沒上線前的時段不列入統計
     const st = STATUSES[seg.status];
     if (st?.working) result.workMinutes += minusLunch(seg.start, seg.end);
     if (seg.status === 'lunch') result.lunchMinutes += seg.end - seg.start;
@@ -310,7 +312,7 @@ export function evaluateDay({ date, events = [], leaves = [], workday = true, to
   const fullLeave = evaluateSchedule(0, leaves).fullLeave;
   const remoteToday = evs.some((e) => e.status === 'remote');
   // 休戰日在家修煉不算「假日加場」
-  if (!workday) result.state = evs.length && !remoteToday ? 'extra' : 'holiday';
+  if (!workday) result.state = firstIn && !remoteToday ? 'extra' : 'holiday';
   else if (fullLeave) result.state = 'leave';
   else if (!firstIn) result.state = isFuture ? 'future' : isToday ? 'pending' : 'noRecord';
   else if (result.departure == null) result.state = isToday ? 'inProgress' : 'missingOff';
